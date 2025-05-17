@@ -57,6 +57,7 @@ const setupWebSocket = require('./services/websocket');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const arbitrageRoutes = require('./routes/arbitrageRoutes');
+const blogRoutes = require('./routes/blogRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -88,6 +89,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/arbitrage', arbitrageRoutes);
+app.use('/api/blogs', blogRoutes);
 
 setupWebSocket(server);
 
