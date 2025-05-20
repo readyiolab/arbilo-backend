@@ -2,6 +2,9 @@
 const transporter = require("./mailer")
 
 
+
+
+
 const sendWelcomeEmail = async (name, email) => {
   try {
     const mailOptions = {
@@ -74,19 +77,41 @@ const sendWelcomeEmail = async (name, email) => {
 const sendPasswordChangeNotification = async (name, email) => {
   try {
     const mailOptions = {
-      from: '"Arbilo" <hello@arbilo.com>', // Sender email
+      from: '"Arbilo" <hello@arbilo.com>',
       to: email,
       subject: "Your Password Has Been Changed Successfully",
       html: `
-        <p>Dear ${name},</p>
+        <div style="font-family: Arial, sans-serif; background-color: #f7f7f7; padding: 20px;">
+          <table align="center" width="600" style="background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+            <tr>
+              <td align="center" style="background-color: #222222; padding: 20px;">
+                <img src="https://res.cloudinary.com/dp50h8gbe/image/upload/v1738745363/gwkvk5vkbzvb5b7hosxj.png" alt="Arbilo Logo" width="120" style="display: block;">
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 30px;">
+                <p>Dear ${name},</p>
 
-        <p>We wanted to inform you that your password has been successfully changed. If you made this change, no further action is required.</p>
+                <p>We wanted to inform you that your password has been successfully changed.</p>
 
-        <p>However, if you did not request this change, please reset your password immediately and contact our support team at <a href="mailto:hello@arbilo.com">hello@arbilo.com</a> for assistance.</p>
+                <p>If you did not request this change, please reset your password immediately and contact our support team at <a href="mailto:hello@arbilo.com">hello@arbilo.com</a>.</p>
 
-        <p>For security, we recommend regularly updating your password and keeping your account details safe.</p>
-
-        <p>Best Regards,<br>The Arbilo Team</p>
+                <p>Best Regards,<br>The Arbilo Team</p>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="background-color: #f1f1f1; padding: 20px;">
+                <p>Connect with us:</p>
+                <p>
+                  <a href="https://www.instagram.com/arbilo01/"><img src="https://img.icons8.com/ios-filled/24/instagram-new.png" alt="Instagram" style="margin: 0 8px;"></a>
+                  <a href="https://www.facebook.com/profile.php?id=61576167397019"><img src="https://img.icons8.com/ios-filled/24/facebook.png" alt="Facebook" style="margin: 0 8px;"></a>
+                  <a href="https://www.youtube.com/@Arbilo-p2p"><img src="https://img.icons8.com/ios-filled/24/youtube-play.png" alt="YouTube" style="margin: 0 8px;"></a>
+                  <a href="https://www.linkedin.com/company/arbilo"><img src="https://img.icons8.com/ios-filled/24/linkedin.png" alt="LinkedIn" style="margin: 0 8px;"></a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </div>
       `,
     };
 
@@ -98,40 +123,60 @@ const sendPasswordChangeNotification = async (name, email) => {
   }
 };
 
+
 const sendCredentialsEmail = async (name, email, password) => {
   try {
     await transporter.sendMail({
-      from: `"Arbilo" <hello@arbilo.com>`, // Correct sender format
-      to: `"${name}" <${email}>`, // Ensure both name and email are included properly
+      from: `"Arbilo" <hello@arbilo.com>`,
+      to: `"${name}" <${email}>`,
       subject: "Your Arbilo Premium Access is Ready! 🎉",
       html: `
-        <p>Dear ${name},</p>
+        <div style="font-family: Arial, sans-serif; background-color: #f7f7f7; padding: 20px;">
+          <table align="center" width="600" style="background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+            <tr>
+              <td align="center" style="background-color: #222222; padding: 20px;">
+                <img src="https://res.cloudinary.com/dp50h8gbe/image/upload/v1738745363/gwkvk5vkbzvb5b7hosxj.png" alt="Arbilo Logo" width="120" style="display: block;">
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 30px;">
+                <p>Dear ${name},</p>
+                <p>Your Arbilo-Arbitrage Premium Plan access is now fully set up!</p>
 
-        <p>Your Arbilo-Arbitrage Premium Plan access is now fully set up! You can log in and start exploring real-time arbitrage signals right away.</p>
+                <p><strong>Your Login Credentials:</strong></p>
+                <ul>
+                  <li><strong>Platform:</strong> <a href="https://arbilo.com">https://arbilo.com</a></li>
+                  <li><strong>Email:</strong> ${email}</li>
+                  <li><strong>Password:</strong> ${password}</li>
+                </ul>
 
-        <p><strong>Your Login Credentials:</strong></p>
-        <ul>
-          <li>🔹 <strong>Platform:</strong> <a href="https://arbilo.com">https://arbilo.com</a></li>
-          <li>🔹 <strong>Email:</strong> ${email}</li>
-          <li>🔹 <strong>Password:</strong> ${password}</li>
-        </ul>
+                <p><strong>For security reasons, please change your password after logging in.</strong></p>
 
-        <p>📌 <strong>For security reasons, we recommend changing your password after logging in.</strong></p>
+                <p><strong>Getting Started:</strong></p>
+                <ul>
+                  <li>✅ Log in and explore <strong>ArbiPair</strong> and <strong>ArbiTrack</strong></li>
+                  <li>✅ Manage your account settings</li>
+                </ul>
 
-        <p><strong>Getting Started:</strong></p>
-        <ul>
-          <li>✅ <strong>Log in:</strong> Visit <a href="https://arbilo.com">Arbilo</a> and enter your credentials.</li>
-          <li>✅ <strong>Explore Signals:</strong> Check out ArbiPair and ArbiTrack for real-time arbitrage opportunities.</li>
-          <li>✅ <strong>Manage Your Account:</strong> Update your password and subscription details in the settings.</li>
-        </ul>
+                <p>If you need help, contact us at <a href="mailto:hello@arbilo.com">hello@arbilo.com</a></p>
+                <p>Welcome aboard! 🚀</p>
 
-        <p><strong>Need Help?</strong></p>
-        <p>If you have any questions or need assistance, feel free to reach out to us at 
-        <a href="mailto:hello@arbilo.com">hello@arbilo.com</a>—we’re happy to help!</p>
-
-        <p>Thank you for joining Arbilo! Wishing you success in your trading journey. 🚀</p>
-
-        <p>Best Regards,<br>The Arbilo Team</p>
+                <p>Best Regards,<br>The Arbilo Team</p>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="background-color: #f1f1f1; padding: 20px;">
+                <p>Connect with us:</p>
+                <p>
+                  <a href="https://www.instagram.com/arbilo01/"><img src="https://img.icons8.com/ios-filled/24/instagram-new.png" alt="Instagram" style="margin: 0 8px;"></a>
+                  <a href="https://www.facebook.com/profile.php?id=61576167397019"><img src="https://img.icons8.com/ios-filled/24/facebook.png" alt="Facebook" style="margin: 0 8px;"></a>
+                  <a href="https://www.youtube.com/@Arbilo-p2p"><img src="https://img.icons8.com/ios-filled/24/youtube-play.png" alt="YouTube" style="margin: 0 8px;"></a>
+                  <a href="https://www.linkedin.com/company/arbilo"><img src="https://img.icons8.com/ios-filled/24/linkedin.png" alt="LinkedIn" style="margin: 0 8px;"></a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </div>
       `,
     });
   } catch (err) {
@@ -139,9 +184,6 @@ const sendCredentialsEmail = async (name, email, password) => {
     throw err;
   }
 };
-
-
-
 
 
 

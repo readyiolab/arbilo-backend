@@ -2,10 +2,10 @@ const db = require("../config/db_settings");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
-const {jwtSecret}  = require("../config/dotenvConfig")
+const { jwtSecret } = require("../config/dotenvConfig");
 const generator = require("generate-password");
-const { format, addDays, addMonths } = require('date-fns')
-const {sendCredentialsEmail} = require("../services/emailService")
+const { format, addDays, addMonths } = require("date-fns");
+const { sendCredentialsEmail } = require("../services/emailService");
 // Secret for JWT
 const JWT_SECRET = jwtSecret;
 
@@ -37,7 +37,11 @@ const adminSignup = async (req, res) => {
     }
 
     // Check if admin already exists
-    const existingAdmin = await db.select("tbl_admins", "*", `email='${email}'`);
+    const existingAdmin = await db.select(
+      "tbl_admins",
+      "*",
+      `email='${email}'`
+    );
     if (existingAdmin) {
       return res.status(400).json({ message: "Email already exists" });
     }
@@ -74,12 +78,20 @@ const adminLogin = async (req, res) => {
     }
 
     // Generate a new session token
-    const sessionToken = jwt.sign({ id: admin.id, email: admin.email }, JWT_SECRET, {
-      expiresIn: "1h",
-    });
+    const sessionToken = jwt.sign(
+      { id: admin.id, email: admin.email },
+      JWT_SECRET,
+      {
+        expiresIn: "1h",
+      }
+    );
 
     // Update the admin's session token in the database
-    await db.update("tbl_admins", { session_token: sessionToken }, `id=${admin.id}`);
+    await db.update(
+      "tbl_admins",
+      { session_token: sessionToken },
+      `id=${admin.id}`
+    );
 
     // Return the session token and admin data in the response
     res.json({
@@ -100,7 +112,8 @@ const getAdminProfile = async (req, res) => {
     const adminId = req.admin.id; // This comes from the auth middleware
 
     // Fetch admin details from database
-    const admin = await db.select("tbl_admins", 
+    const admin = await db.select(
+      "tbl_admins",
       "id, name, email, created_at", // Only select non-sensitive fields
       `id=${adminId}`
     );
@@ -131,7 +144,7 @@ const updateAdminProfile = async (req, res) => {
 
     // Prepare update data
     const updateData = {};
-    
+
     // Update name if provided
     if (name) {
       updateData.name = name;
@@ -140,7 +153,11 @@ const updateAdminProfile = async (req, res) => {
     // Update email if provided
     if (email && email !== admin.email) {
       // Check if new email already exists
-      const emailExists = await db.select("tbl_admins", "id", `email='${email}' AND id!=${adminId}`);
+      const emailExists = await db.select(
+        "tbl_admins",
+        "id",
+        `email='${email}' AND id!=${adminId}`
+      );
       if (emailExists) {
         return res.status(400).json({ message: "Email already in use" });
       }
@@ -150,9 +167,14 @@ const updateAdminProfile = async (req, res) => {
     // Update password if provided
     if (currentPassword && newPassword) {
       // Verify current password
-      const isPasswordValid = await bcrypt.compare(currentPassword, admin.password);
+      const isPasswordValid = await bcrypt.compare(
+        currentPassword,
+        admin.password
+      );
       if (!isPasswordValid) {
-        return res.status(400).json({ message: "Current password is incorrect" });
+        return res
+          .status(400)
+          .json({ message: "Current password is incorrect" });
       }
 
       // Hash new password
@@ -187,7 +209,6 @@ const getAllUsers = async (req, res) => {
   }
 };
 
-
 const toggleUserActiveStatus = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -195,19 +216,22 @@ const toggleUserActiveStatus = async (req, res) => {
 
     // Validate that is_active is either 1 or 0
     if (is_active !== 0 && is_active !== 1) {
-      return res.status(400).json({ message: "Invalid value for is_active. It must be 0 or 1." });
+      return res
+        .status(400)
+        .json({ message: "Invalid value for is_active. It must be 0 or 1." });
     }
 
     // If user is being deactivated, reset subscription-related fields
-    const updatedFields = is_active === 0
-      ? {
-          is_active,
-          subscription_type: null,
-          subscription_status: null,
-          subscription_start_date: null,
-          subscription_end_date: null
-        }
-      : { is_active }; // If user is being activated, no need to change subscription fields
+    const updatedFields =
+      is_active === 0
+        ? {
+            is_active,
+            subscription_type: null,
+            subscription_status: null,
+            subscription_start_date: null,
+            subscription_end_date: null,
+          }
+        : { is_active }; // If user is being activated, no need to change subscription fields
 
     // Update the user's active status and subscription fields in the database
     const result = await db.update(
@@ -238,7 +262,7 @@ const createUserAndSendCredentials = async (req, res) => {
     }
 
     // Validate subscription type
-    const validTypes = ['monthly', '6-months'];
+    const validTypes = ["monthly", "6-months"];
     if (!validTypes.includes(subscription_type)) {
       return res.status(400).json({ message: "Invalid subscription type" });
     }
@@ -249,14 +273,26 @@ const createUserAndSendCredentials = async (req, res) => {
       return res.status(400).json({ message: "Email already exists" });
     }
 
-    // Generate a random password
-    const password = generator.generate({
-      length: 10,
-      numbers: true,
-      symbols: true,
-      uppercase: true,
-      lowercase: true,
-    });
+    // Generate a random password - FIXED to ensure 10 characters
+    let password;
+    do {
+      password = generator.generate({
+        length: 10,
+        numbers: true,
+        symbols: true,
+        uppercase: true,
+        lowercase: true,
+        strict: true, // Ensures all character types are included
+      });
+    } while (password.length !== 10);
+
+    // Alternative approach if the above doesn't work with your generator library:
+    // const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+";
+    // let password = "";
+    // for (let i = 0; i < 10; i++) {
+    //   const randomIndex = Math.floor(Math.random() * charset.length);
+    //   password += charset[randomIndex];
+    // }
 
     // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -272,9 +308,10 @@ const createUserAndSendCredentials = async (req, res) => {
     const subscriptionStartDate = addDays(trialEndDate, 1);
 
     // Calculate subscription end date
-    const subscriptionEndDate = subscription_type === "monthly" 
-      ? addMonths(subscriptionStartDate, 1)
-      : addMonths(subscriptionStartDate, 6);
+    const subscriptionEndDate =
+      subscription_type === "monthly"
+        ? addMonths(subscriptionStartDate, 1)
+        : addMonths(subscriptionStartDate, 6);
 
     // Insert new user into the database
     await db.insert("tbl_users", {
@@ -282,10 +319,10 @@ const createUserAndSendCredentials = async (req, res) => {
       name,
       password: hashedPassword,
       subscription_type,
-      subscription_status: 'trial',
-      subscription_start_date: format(subscriptionStartDate, 'yyyy-MM-dd'),
-      subscription_end_date: format(subscriptionEndDate, 'yyyy-MM-dd'),
-      trial_end_date: format(trialEndDate, 'yyyy-MM-dd'),
+      subscription_status: "trial",
+      subscription_start_date: format(subscriptionStartDate, "yyyy-MM-dd"),
+      subscription_end_date: format(subscriptionEndDate, "yyyy-MM-dd"),
+      trial_end_date: format(trialEndDate, "yyyy-MM-dd"),
       is_active: 1,
       created_at: new Date(),
       updated_at: new Date(),
@@ -294,13 +331,16 @@ const createUserAndSendCredentials = async (req, res) => {
     // Send credentials email
     await sendCredentialsEmail(name, email, password);
 
+    // Add logging to verify password length (remove in production)
+    console.log(`Generated password length: ${password.length}`);
+
     res.status(201).json({
       message: "User created and credentials sent successfully",
       subscription_details: {
-        trial_end_date: format(trialEndDate, 'yyyy-MM-dd'),
-        subscription_start_date: format(subscriptionStartDate, 'yyyy-MM-dd'),
-        subscription_end_date: format(subscriptionEndDate, 'yyyy-MM-dd'),
-        subscription_status: 'trial',
+        trial_end_date: format(trialEndDate, "yyyy-MM-dd"),
+        subscription_start_date: format(subscriptionStartDate, "yyyy-MM-dd"),
+        subscription_end_date: format(subscriptionEndDate, "yyyy-MM-dd"),
+        subscription_status: "trial",
         is_active: 1,
       },
     });
@@ -319,7 +359,10 @@ const checkTrialExpirations = async () => {
     const expiredTrials = await db.select(
       "tbl_users",
       "*",
-      `trial_end_date <= '${format(today, 'yyyy-MM-dd')}' AND subscription_status = 'trial'`
+      `trial_end_date <= '${format(
+        today,
+        "yyyy-MM-dd"
+      )}' AND subscription_status = 'trial'`
     );
 
     for (const user of expiredTrials) {
@@ -328,7 +371,7 @@ const checkTrialExpirations = async () => {
         "tbl_users",
         {
           is_active: 0,
-          subscription_status: 'expired',
+          subscription_status: "expired",
           updated_at: new Date(),
         },
         `id = ${user.id}`
@@ -346,19 +389,21 @@ const updateUser = async (req, res) => {
 
     // Validate required fields
     if (!email || !subscription_type) {
-      return res.status(400).json({ message: 'Email and subscription type are required' });
+      return res
+        .status(400)
+        .json({ message: "Email and subscription type are required" });
     }
 
     // Validate subscription type
-    const validTypes = ['monthly', '6-months'];
+    const validTypes = ["monthly", "6-months"];
     if (!validTypes.includes(subscription_type)) {
-      return res.status(400).json({ message: 'Invalid subscription type' });
+      return res.status(400).json({ message: "Invalid subscription type" });
     }
 
     // Check if user exists
-    const user = await db.select('tbl_users', '*', `email='${email}'`);
+    const user = await db.select("tbl_users", "*", `email='${email}'`);
     if (!user || user.length === 0) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: "User not found" });
     }
 
     // Use provided start_date or default to today
@@ -368,22 +413,23 @@ const updateUser = async (req, res) => {
     // Calculate trial and subscription dates
     const trialEndDate = addDays(startDate, 7);
     const subscriptionStartDate = addDays(trialEndDate, 1);
-    const subscriptionEndDate = subscription_type === 'monthly'
-      ? addMonths(subscriptionStartDate, 1)
-      : addMonths(subscriptionStartDate, 6);
+    const subscriptionEndDate =
+      subscription_type === "monthly"
+        ? addMonths(subscriptionStartDate, 1)
+        : addMonths(subscriptionStartDate, 6);
 
     // If user is being activated (e.g., after payment), set status to 'active'
-    const subscriptionStatus = user.is_active === 0 ? 'active' : 'trial';
+    const subscriptionStatus = user.is_active === 0 ? "active" : "trial";
 
     // Update user subscription info
     await db.update(
-      'tbl_users',
+      "tbl_users",
       {
         subscription_type,
         subscription_status: subscriptionStatus,
-        subscription_start_date: format(subscriptionStartDate, 'yyyy-MM-dd'),
-        subscription_end_date: format(subscriptionEndDate, 'yyyy-MM-dd'),
-        trial_end_date: format(trialEndDate, 'yyyy-MM-dd'),
+        subscription_start_date: format(subscriptionStartDate, "yyyy-MM-dd"),
+        subscription_end_date: format(subscriptionEndDate, "yyyy-MM-dd"),
+        trial_end_date: format(trialEndDate, "yyyy-MM-dd"),
         is_active: 1,
         updated_at: new Date(),
       },
@@ -391,22 +437,21 @@ const updateUser = async (req, res) => {
     );
 
     return res.status(200).json({
-      message: 'Subscription updated successfully',
+      message: "Subscription updated successfully",
       subscription_details: {
         subscription_type,
-        subscription_start_date: format(subscriptionStartDate, 'yyyy-MM-dd'),
-        subscription_end_date: format(subscriptionEndDate, 'yyyy-MM-dd'),
-        trial_end_date: format(trialEndDate, 'yyyy-MM-dd'),
+        subscription_start_date: format(subscriptionStartDate, "yyyy-MM-dd"),
+        subscription_end_date: format(subscriptionEndDate, "yyyy-MM-dd"),
+        trial_end_date: format(trialEndDate, "yyyy-MM-dd"),
         subscription_status: subscriptionStatus,
         is_active: 1,
       },
     });
   } catch (error) {
-    console.error('Error updating subscription:', error);
-    return res.status(500).json({ message: 'Internal Server Error' });
+    console.error("Error updating subscription:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
   }
 };
-
 
 module.exports = {
   adminSignup,
@@ -417,5 +462,5 @@ module.exports = {
   toggleUserActiveStatus,
   updateUser,
   createUserAndSendCredentials,
-  checkTrialExpirations
+  checkTrialExpirations,
 };

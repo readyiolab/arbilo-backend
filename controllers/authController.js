@@ -181,17 +181,44 @@ const forgotPassword = async (req, res) => {
     const resetLink = `https://arbilo.com/reset-password/${resetToken}`;
 
     await transporter.sendMail({
-      from: "hello@arbilo.com",
-      to: email,
-      subject: "Password Reset",
-      html: `
-        <p>Dear ${user.name},</p>
-        <p>Click the link below to reset your password. The link will expire in 5 minutes:</p>
-        <a href="${resetLink}" style="display: inline-block; background-color: #4CAF50; color: #ffffff; text-decoration: none; padding: 10px 15px; border-radius: 5px; font-size: 16px;">Reset Password</a>
-        <p>If you didn't request this, please ignore this email.</p>
-        <p>Regards,<br>Arbilo</p>
-      `,
-    });
+  from: `"Arbilo Password Reset" <hello@arbilo.com>`,
+  to: email,
+  subject: "Password Reset",
+  html: `
+    <div style="font-family: Arial, sans-serif; background-color: #f7f7f7; padding: 20px;">
+      <table align="center" width="600" style="background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+        <tr>
+          <td align="center" style="background-color: #222222; padding: 20px;">
+            <img src="https://res.cloudinary.com/dp50h8gbe/image/upload/v1738745363/gwkvk5vkbzvb5b7hosxj.png" alt="Arbilo Logo" width="120" style="display: block;">
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 30px;">
+            <p style="font-size: 16px;">Dear ${user.name},</p>
+            <p>Click the button below to reset your password. The link will expire in 5 minutes:</p>
+            <p style="text-align: center;">
+              <a href="${resetLink}" style="background-color: #4CAF50; color: #ffffff; text-decoration: none; padding: 12px 25px; border-radius: 6px; font-weight: bold;">Reset Password</a>
+            </p>
+            <p>If you didn't request this, please ignore this email.</p>
+            <p>Regards,<br>Arbilo</p>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="background-color: #f1f1f1; padding: 20px;">
+            <p>Connect with us:</p>
+            <p>
+              <a href="https://www.instagram.com/arbilo01/"><img src="https://img.icons8.com/ios-filled/24/instagram-new.png" alt="Instagram" style="margin: 0 8px;"></a>
+              <a href="https://www.facebook.com/profile.php?id=61576167397019"><img src="https://img.icons8.com/ios-filled/24/facebook.png" alt="Facebook" style="margin: 0 8px;"></a>
+              <a href="https://www.youtube.com/@Arbilo-p2p"><img src="https://img.icons8.com/ios-filled/24/youtube-play.png" alt="YouTube" style="margin: 0 8px;"></a>
+              <a href="https://www.linkedin.com/company/arbilo"><img src="https://img.icons8.com/ios-filled/24/linkedin.png" alt="LinkedIn" style="margin: 0 8px;"></a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `,
+});
+
 
     res.json({ message: "Password reset email sent" });
   } catch (err) {
@@ -345,93 +372,6 @@ const changePassword = async (req, res) => {
 };
 
 
-// 
-
-//   try {
-//     const { email, name, subscription_type, start_date } = req.body;
-
-//     if (!email || !name || !subscription_type || !start_date) {
-//       return res.status(400).json({
-//         message: "Email, Name, Subscription Type, and Start Date are required",
-//       });
-//     }
-
-//     // Validate start date (must be today or in the future)
-//     const subscriptionStartDate = new Date(start_date);
-//     const today = new Date();
-//     today.setHours(0, 0, 0, 0);
-
-//     if (subscriptionStartDate < today) {
-//       return res.status(400).json({
-//         message: "Subscription start date must be today or a future date",
-//       });
-//     }
-
-//     // Check if user already exists
-//     const existingUser = await db.select("tbl_users", "*", `email='${email}'`);
-//     if (existingUser) {
-//       return res.status(400).json({ message: "Email already exists" });
-//     }
-
-//     // Generate a random password
-//     const password = generator.generate({
-//       length: 10,
-//       numbers: true,
-//       symbols: true,
-//       uppercase: true,
-//       lowercase: true,
-//     });
-
-//     // First, send the credentials email
-//     await sendCredentialsEmail(name, email, password)
-//       .then(async () => {
-//         // Email sent successfully, now hash the password
-//         const hashedPassword = await bcrypt.hash(password, 10);
-
-//         // Calculate subscription end date
-//         let subscriptionEndDate = new Date(subscriptionStartDate);
-//         if (subscription_type === "monthly") {
-//           subscriptionEndDate.setMonth(subscriptionStartDate.getMonth() + 1);
-//         } else if (subscription_type === "quarterly") {
-//           subscriptionEndDate.setMonth(subscriptionStartDate.getMonth() + 3);
-//         } else {
-//           return res.status(400).json({ message: "Invalid subscription type" });
-//         }
-
-//         // Determine if subscription should be active based on start date
-//         const isActive = subscriptionStartDate.toDateString() === today.toDateString() ? 1 : 0;
-
-//         // Insert new user into the database
-//         await db.insert("tbl_users", {
-//           email,
-//           name,
-//           password: hashedPassword,
-//           subscription_type,
-//           subscription_status: isActive ? "active" : "pending",
-//           subscription_start_date: subscriptionStartDate,
-//           subscription_end_date: subscriptionEndDate,
-//           is_active: isActive,
-//         });
-
-//         res.status(201).json({
-//           message: "User created and credentials sent successfully",
-//           subscription_details: {
-//             start_date: format(subscriptionStartDate, "yyyy-MM-dd"),
-//             end_date: format(subscriptionEndDate, "yyyy-MM-dd"),
-//             is_active: isActive,
-//             subscription_status: isActive ? "active" : "pending",
-//           },
-//         });
-//       })
-//       .catch((emailError) => {
-//         console.error("Error sending credentials email:", emailError);
-//         return res.status(500).json({ message: "Failed to send email. Try again." });
-//       });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ message: "Internal Server Error" });
-//   }
-// };
 
 
 // Contact Us endpoint
