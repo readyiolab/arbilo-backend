@@ -72,6 +72,10 @@ const createBlog = async (req, res) => {
     const published_at = status === "published" ? new Date() : null;
     const created_at = new Date();
     const updated_at = new Date();
+
+    // Convert is_featured to 0 or 1
+    const isFeaturedNumeric = is_featured ? 1 : 0;
+
     const blog = await db.insert("tbl_blogs", {
       title,
       excerpt,
@@ -83,7 +87,7 @@ const createBlog = async (req, res) => {
       status,
       read_time,
       tags: JSON.stringify(tags),
-      is_featured,
+      is_featured: isFeaturedNumeric, // Use numeric value
       published_at,
       created_at,
       updated_at,
