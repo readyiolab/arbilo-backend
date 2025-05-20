@@ -3,7 +3,9 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
 const {jwtSecret}  = require("../config/dotenvConfig")
-
+const generator = require("generate-password");
+const { format, addDays, addMonths } = require('date-fns')
+const {sendCredentialsEmail} = require("../services/emailService")
 // Secret for JWT
 const JWT_SECRET = jwtSecret;
 
@@ -224,6 +226,186 @@ const toggleUserActiveStatus = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+const createUserAndSendCredentials = async (req, res) => {
+  try {
+    const { email, name, subscription_type, start_date } = req.body;
+
+    // Validate required fields
+    if (!email || !name || !subscription_type || !start_date) {
+      return res.status(400).json({
+        message: "Email, Name, Subscription Type, and Start Date are required",
+      });
+    }
+
+    // Validate subscription type
+    const validTypes = ['monthly', '6-months'];
+    if (!validTypes.includes(subscription_type)) {
+      return res.status(400).json({ message: "Invalid subscription type" });
+    }
+
+    // Check if user already exists
+    const existingUser = await db.select("tbl_users", "*", `email='${email}'`);
+    if (existingUser && existingUser.length > 0) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
+
+    // Generate a random password
+    const password = generator.generate({
+      length: 10,
+      numbers: true,
+      symbols: true,
+      uppercase: true,
+      lowercase: true,
+    });
+
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Calculate dates
+    const startDate = new Date(start_date);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Trial period: 7 days from start date
+    const trialEndDate = addDays(startDate, 7);
+
+    // Subscription starts after trial
+    const subscriptionStartDate = addDays(trialEndDate, 1);
+
+    // Calculate subscription end date
+    const subscriptionEndDate = subscription_type === "monthly" 
+      ? addMonths(subscriptionStartDate, 1)
+      : addMonths(subscriptionStartDate, 6);
+
+    // Insert new user into the database
+    await db.insert("tbl_users", {
+      email,
+      name,
+      password: hashedPassword,
+      subscription_type,
+      subscription_status: 'trial',
+      subscription_start_date: format(subscriptionStartDate, 'yyyy-MM-dd'),
+      subscription_end_date: format(subscriptionEndDate, 'yyyy-MM-dd'),
+      trial_end_date: format(trialEndDate, 'yyyy-MM-dd'),
+      is_active: 1,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    // Send credentials email
+    await sendCredentialsEmail(name, email, password);
+
+    res.status(201).json({
+      message: "User created and credentials sent successfully",
+      subscription_details: {
+        trial_end_date: format(trialEndDate, 'yyyy-MM-dd'),
+        subscription_start_date: format(subscriptionStartDate, 'yyyy-MM-dd'),
+        subscription_end_date: format(subscriptionEndDate, 'yyyy-MM-dd'),
+        subscription_status: 'trial',
+        is_active: 1,
+      },
+    });
+  } catch (err) {
+    console.error("Error in createUserAndSendCredentials:", err);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+// Cron job to update subscription statuses
+const checkTrialExpirations = async () => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Find users whose trial has ended and haven't paid
+    const expiredTrials = await db.select(
+      "tbl_users",
+      "*",
+      `trial_end_date <= '${format(today, 'yyyy-MM-dd')}' AND subscription_status = 'trial'`
+    );
+
+    for (const user of expiredTrials) {
+      // Update user to inactive since trial ended without payment
+      await db.update(
+        "tbl_users",
+        {
+          is_active: 0,
+          subscription_status: 'expired',
+          updated_at: new Date(),
+        },
+        `id = ${user.id}`
+      );
+    }
+  } catch (err) {
+    console.error("Error in checkTrialExpirations:", err);
+  }
+};
+
+// Update User Subscription
+const updateUser = async (req, res) => {
+  try {
+    const { email, subscription_type, start_date } = req.body;
+
+    // Validate required fields
+    if (!email || !subscription_type) {
+      return res.status(400).json({ message: 'Email and subscription type are required' });
+    }
+
+    // Validate subscription type
+    const validTypes = ['monthly', '6-months'];
+    if (!validTypes.includes(subscription_type)) {
+      return res.status(400).json({ message: 'Invalid subscription type' });
+    }
+
+    // Check if user exists
+    const user = await db.select('tbl_users', '*', `email='${email}'`);
+    if (!user || user.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Use provided start_date or default to today
+    const startDate = start_date ? new Date(start_date) : new Date();
+    startDate.setHours(0, 0, 0, 0);
+
+    // Calculate trial and subscription dates
+    const trialEndDate = addDays(startDate, 7);
+    const subscriptionStartDate = addDays(trialEndDate, 1);
+    const subscriptionEndDate = subscription_type === 'monthly'
+      ? addMonths(subscriptionStartDate, 1)
+      : addMonths(subscriptionStartDate, 6);
+
+    // If user is being activated (e.g., after payment), set status to 'active'
+    const subscriptionStatus = user.is_active === 0 ? 'active' : 'trial';
+
+    // Update user subscription info
+    await db.update(
+      'tbl_users',
+      {
+        subscription_type,
+        subscription_status: subscriptionStatus,
+        subscription_start_date: format(subscriptionStartDate, 'yyyy-MM-dd'),
+        subscription_end_date: format(subscriptionEndDate, 'yyyy-MM-dd'),
+        trial_end_date: format(trialEndDate, 'yyyy-MM-dd'),
+        is_active: 1,
+        updated_at: new Date(),
+      },
+      `email = '${email}'`
+    );
+
+    return res.status(200).json({
+      message: 'Subscription updated successfully',
+      subscription_details: {
+        subscription_type,
+        subscription_start_date: format(subscriptionStartDate, 'yyyy-MM-dd'),
+        subscription_end_date: format(subscriptionEndDate, 'yyyy-MM-dd'),
+        trial_end_date: format(trialEndDate, 'yyyy-MM-dd'),
+        subscription_status: subscriptionStatus,
+        is_active: 1,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating subscription:', error);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+};
 
 
 module.exports = {
@@ -233,4 +415,7 @@ module.exports = {
   updateAdminProfile,
   getAllUsers,
   toggleUserActiveStatus,
+  updateUser,
+  createUserAndSendCredentials,
+  checkTrialExpirations
 };
