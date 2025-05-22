@@ -66,7 +66,7 @@ const port = 5000;
 const allowedOrigins = [
     'https://arbilo.com',
     'https://www.arbilo.com',
-    'http://localhost:5173'
+    'http://localhost:5175'
 ];
 
 app.use(cors({

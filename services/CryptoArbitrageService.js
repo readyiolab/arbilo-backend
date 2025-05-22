@@ -28,7 +28,7 @@ class CryptoArbitrageService {
         ];
 
         this.coinSymbols = [
-            'BTC', 'ETH', 'XRP', 'ADA', 'DOT', 'SOL', 'DOGE', 'SHIB', 'LTC', 'LINK',
+             'ETH', 'XRP', 'ADA', 'DOT', 'SOL', 'DOGE', 'SHIB', 'LTC', 'LINK',
             'MATIC', 'AVAX', 'XLM', 'UNI', 'BCH', 'FIL', 'VET', 'ALGO', 'ATOM', 'ICP'
         ];
 
@@ -186,7 +186,7 @@ class CryptoArbitrageService {
 
                 if (profit.profit > 0) {
                     results.push({
-                        pair: `${coin1} / ${coin2}`,
+                        pair: `${coin1} - ${coin2}`,
                         coin1,
                         coin2,
                         minExchange: minOpp.exchange,

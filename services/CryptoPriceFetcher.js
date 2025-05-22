@@ -11,7 +11,7 @@ class CryptoArbitrageFinder {
         ];
 
         this.coinSymbols = [
-            'BTC', 'ETH', 'XRP', 'ADA', 'DOT', 'SOL', 'DOGE', 
+             'ETH', 'XRP', 'ADA', 'DOT', 'SOL', 'DOGE', 
             'SHIB', 'LTC', 'LINK', 'MATIC', 'AVAX', 'XLM', 
             'UNI', 'BCH', 'FIL', 'VET', 'ALGO', 'ATOM', 'ICP'
         ];

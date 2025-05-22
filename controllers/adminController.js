@@ -268,31 +268,18 @@ const createUserAndSendCredentials = async (req, res) => {
     }
 
     // Check if user already exists
-    const existingUser = await db.select("tbl_users", "*", `email='${email}'`);
+    const existingUser = await db.selectAll("tbl_users", "*", `email='${email}'`);
     if (existingUser && existingUser.length > 0) {
       return res.status(400).json({ message: "Email already exists" });
     }
 
-    // Generate a random password - FIXED to ensure 10 characters
-    let password;
-    do {
-      password = generator.generate({
-        length: 10,
-        numbers: true,
-        symbols: true,
-        uppercase: true,
-        lowercase: true,
-        strict: true, // Ensures all character types are included
-      });
-    } while (password.length !== 10);
-
-    // Alternative approach if the above doesn't work with your generator library:
-    // const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+";
-    // let password = "";
-    // for (let i = 0; i < 10; i++) {
-    //   const randomIndex = Math.floor(Math.random() * charset.length);
-    //   password += charset[randomIndex];
-    // }
+    // Generate a random password of 8 characters
+    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+";
+    let password = "";
+    for (let i = 0; i < 8; i++) {
+      const randomIndex = Math.floor(Math.random() * charset.length);
+      password += charset[randomIndex];
+    }
 
     // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -346,6 +333,9 @@ const createUserAndSendCredentials = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in createUserAndSendCredentials:", err);
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ message: "Email already exists" });
+    }
     res.status(500).json({ message: "Internal Server Error" });
   }
 };

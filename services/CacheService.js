@@ -4,8 +4,6 @@ class CacheService {
     static CACHE_KEYS = {
         ARBI_TRACK: 'arbitrack_data',
         ARBI_PAIR: 'arbipair_data',
-        SENTIMENT_ALL: 'sentiment_all_data',
-        SENTIMENT_COIN: 'sentiment_coin' // Will be used with suffix: sentiment_coin_BTC, etc.
     };
     
     static CACHE_TTL = 300; // 5 minutes in seconds
