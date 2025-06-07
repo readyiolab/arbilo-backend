@@ -2,10 +2,12 @@ const express = require('express');
 const CryptoArbitrageService = require('../services/CryptoArbitrageService');
 const CryptoPriceFetcher = require('../services/CryptoPriceFetcher');
 const CacheService = require('../services/CacheService');
+const TriangularArbitrageFinder = require('../services/TriangularArbitrageFinder'); // Import the TriangularArbitrageFinder class
 const router = express.Router();
 const combinedMiddleware = require('../middleware/userMiddleware');
 
 const priceFetcher = new CryptoPriceFetcher();
+const triangularFinder = new TriangularArbitrageFinder(); // Instantiate TriangularArbitrageFinder
 
 // Fetch crypto price data and sort it
 const fetchAndProcessData = async () => {
@@ -21,12 +23,38 @@ const fetchArbitrageData = async () => {
     return await cryptoService.getArbitrageOpportunities(100000);
 };
 
+// Fetch triangular arbitrage opportunities
+const fetchTriangularArbitrageData = async () => {
+    try {
+        const opportunities = await triangularFinder.findTriangularOpportunities();
+        return opportunities;
+    } catch (error) {
+        console.error('Error fetching triangular arbitrage opportunities:', error);
+        throw error;
+    }
+};
+
 // 🟢 Start auto-refreshing cache every 5 minutes
 CacheService.refreshCachePeriodically(fetchAndProcessData, CacheService.CACHE_KEYS.ARBI_TRACK);
 CacheService.refreshCachePeriodically(fetchArbitrageData, CacheService.CACHE_KEYS.ARBI_PAIR);
+CacheService.refreshCachePeriodically(fetchTriangularArbitrageData, CacheService.CACHE_KEYS.TRIANGULAR_ARBI);
 
+
+
+router.get('/triangular', combinedMiddleware, async (req, res) => {
+    try {
+        const data = await CacheService.getOrSetCache(
+            CacheService.CACHE_KEYS.TRIANGULAR_ARBI,
+            fetchTriangularArbitrageData
+        );
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching triangular arbitrage opportunities:', error);
+        res.status(500).json({ error: 'Failed to fetch triangular arbitrage opportunities' });
+    }
+});
 // API Endpoints
-router.get('/arbitrack',combinedMiddleware, async (req, res) => {
+router.get('/arbitrack', combinedMiddleware, async (req, res) => {
     try {
         const data = await CacheService.getOrSetCache(
             CacheService.CACHE_KEYS.ARBI_TRACK,
@@ -39,7 +67,7 @@ router.get('/arbitrack',combinedMiddleware, async (req, res) => {
     }
 });
 
-router.get('/:investment?',combinedMiddleware, async (req, res) => {
+router.get('/:investment?', combinedMiddleware, async (req, res) => {
     try {
         const investment = parseFloat(req.params.investment) || 100000;
 
@@ -54,5 +82,8 @@ router.get('/:investment?',combinedMiddleware, async (req, res) => {
         res.status(500).json({ error: 'Failed to calculate arbitrage opportunities' });
     }
 });
+
+
+
 
 module.exports = router;

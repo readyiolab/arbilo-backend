@@ -4,6 +4,7 @@ class CacheService {
     static CACHE_KEYS = {
         ARBI_TRACK: 'arbitrack_data',
         ARBI_PAIR: 'arbipair_data',
+        TRIANGULAR_ARBI: 'triangular_arbi'
     };
     
     static CACHE_TTL = 300; // 5 minutes in seconds

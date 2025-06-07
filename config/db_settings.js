@@ -1,15 +1,14 @@
 const mysql = require('mysql');
-const {dbHost,dbName,dbPass,dbUser} = require("./dotenvConfig")
+const { dbHost, dbName, dbPass, dbUser } = require("./dotenvConfig");
 
 class Database {
     constructor() {
-        
         // this.host = 'localhost';
         // this.username = 'root';
         // this.password = '';
         // this.database = 'db_arbilo';
         this.host = dbHost; 
-        this.username =dbUser; 
+        this.username = dbUser; 
         this.password = dbPass; 
         this.database = dbName; 
         this.conn = mysql.createConnection({
@@ -32,17 +31,17 @@ class Database {
         });
     }
 
-    select(tbl_name, column = '*', where = '', print = false) {
+    select(tbl_name, column = '*', where = '', params = [], print = false) {
         let wr = '';
         if (where !== '') {
             wr = `WHERE ${where}`;
         }
         const sql = `SELECT ${column} FROM ${tbl_name} ${wr}`;
         if (print) {
-            console.log(sql);
+            console.log('SQL:', sql, 'Params:', params);
         }
         return new Promise((resolve, reject) => {
-            this.conn.query(sql, (err, results) => {
+            this.conn.query(sql, params, (err, results) => {
                 if (err) {
                     reject(err);
                     return;
@@ -52,17 +51,17 @@ class Database {
         });
     }
 
-    selectAll(tbl_name, column = '*', where = '', orderby = '', print = false) {
+    selectAll(tbl_name, column = '*', where = '', params = [], orderby = '', print = false) {
         let wr = '';
         if (where !== '') {
             wr = `WHERE ${where}`;
         }
         const sql = `SELECT ${column} FROM ${tbl_name} ${wr} ${orderby}`;
         if (print) {
-            console.log(sql);
+            console.log('SQL:', sql, 'Params:', params);
         }
         return new Promise((resolve, reject) => {
-            this.conn.query(sql, (err, results) => {
+            this.conn.query(sql, params, (err, results) => {
                 if (err) {
                     reject(err);
                     return;
@@ -74,48 +73,45 @@ class Database {
 
     insert(tbl_name, data, print = false) {
         const fields = Object.keys(data).map(key => `\`${key}\``).join(',');
-        const values = Object.values(data).map(value => (value === null ? 'NULL' : this.conn.escape(value))).join(',');
+        const placeholders = Object.keys(data).map(() => '?').join(',');
+        const values = Object.values(data);
     
-        const sql = `INSERT INTO ${tbl_name} (${fields}) VALUES (${values})`;
+        const sql = `INSERT INTO ${tbl_name} (${fields}) VALUES (${placeholders})`;
         if (print) {
-            console.log(sql);
+            console.log('SQL:', sql, 'Params:', values);
         }
         return new Promise((resolve, reject) => {
-            this.conn.query(sql, (err, result) => {
+            this.conn.query(sql, values, (err, result) => {
                 if (err) {
                     reject(err);
                     return;
                 }
                 resolve({
                     status: true,
-                    insert_id: result.insertId,
+                    insertId: result.insertId,
                     affected_rows: result.affectedRows,
                     info: result.info
                 });
             });
         });
     }
-    
 
-    update(table_name, form_data, where = '', print = false) {
+    update(table_name, form_data, where = '', params = [], print = false) {
         let whereSQL = '';
         if (where !== '') {
             whereSQL = ` WHERE ${where}`;
         }
     
-        const sets = Object.entries(form_data).map(([column, value]) => {
-            if (value === null) {
-                return `\`${column}\` = NULL`;
-            }
-            return `\`${column}\` = ${this.conn.escape(value)}`; // Removed single quotes around value
-        });
+        const sets = Object.entries(form_data).map(([column]) => `\`${column}\` = ?`);
+        const values = Object.values(form_data);
+        const queryParams = [...values, ...params];
     
-        const sql = `UPDATE ${table_name} SET ${sets.join(', ')} ${whereSQL}`;
+        const sql = `UPDATE ${table_name} SET ${sets.join(', ')}${whereSQL}`;
         if (print) {
-            console.log(sql);
+            console.log('SQL:', sql, 'Params:', queryParams);
         }
         return new Promise((resolve, reject) => {
-            this.conn.query(sql, (err, result) => {
+            this.conn.query(sql, queryParams, (err, result) => {
                 if (err) {
                     reject(err);
                     return;
@@ -128,44 +124,38 @@ class Database {
             });
         });
     }
-    
 
-    delete(tbl_name, where = '', print = false) {
+    delete(tbl_name, where = '', params = [], print = false) {
         let whereSQL = '';
         if (where !== '') {
-            whereSQL = ' WHERE ';
-            if (typeof where === 'object') {
-                const conditions = Object.entries(where).map(([key, value]) => `\`${key}\` = '${this.conn.escape(value)}'`);
-                whereSQL += conditions.join(' AND ');
-            } else {
-                whereSQL += where;
-            }
+            whereSQL = ` WHERE ${where}`;
         }
 
-        const sql = `DELETE FROM ${tbl_name} ${whereSQL}`;
+        const sql = `DELETE FROM ${tbl_name}${whereSQL}`;
         if (print) {
-            console.log(sql);
+            console.log('SQL:', sql, 'Params:', params);
         }
         return new Promise((resolve, reject) => {
-            this.conn.query(sql, (err, result) => {
+            this.conn.query(sql, params, (err, result) => {
                 if (err) {
                     reject(err);
                     return;
                 }
                 resolve({
                     status: true,
+                    affected_rows: result.affectedRows,
                     info: result.info
                 });
             });
         });
     }
 
-    query(sql, print = false) {
+    query(sql, params = [], print = false) {
         if (print) {
-            console.log(sql);
+            console.log('SQL:', sql, 'Params:', params);
         }
         return new Promise((resolve, reject) => {
-            this.conn.query(sql, (err, results) => {
+            this.conn.query(sql, params, (err, results) => {
                 if (err) {
                     reject(err);
                     return;
@@ -175,12 +165,12 @@ class Database {
         });
     }
 
-    queryAll(sql, print = false) {
+    queryAll(sql, params = [], print = false) {
         if (print) {
-            console.log(sql);
+            console.log('SQL:', sql, 'Params:', params);
         }
         return new Promise((resolve, reject) => {
-            this.conn.query(sql, (err, results) => {
+            this.conn.query(sql, params, (err, results) => {
                 if (err) {
                     reject(err);
                     return;
@@ -190,12 +180,12 @@ class Database {
         });
     }
 
-    insertAll(sql, print = false) {
+    insertAll(sql, params = [], print = false) {
         if (print) {
-            console.log(sql);
+            console.log('SQL:', sql, 'Params:', params);
         }
         return new Promise((resolve, reject) => {
-            this.conn.query(sql, (err, result) => {
+            this.conn.query(sql, params, (err, result) => {
                 if (err) {
                     reject(err);
                     return;
