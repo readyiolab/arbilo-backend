@@ -443,6 +443,118 @@ const updateUser = async (req, res) => {
   }
 };
 
+// Get free user count
+const getFreeUserCount = async (req, res) => {
+  try {
+    const result = await db.selectAll("tbl_users", "COUNT(*) as count", "is_free_user = 1");
+    const freeUserCount = result.length > 0 ? result[0].count : 0;
+    const remainingSlots = Math.max(0, 2000 - freeUserCount);
+
+    res.json({
+      message: "Free user count retrieved",
+      free_user_count: freeUserCount,
+      total_slots: 2000,
+      remaining_slots: remainingSlots,
+      percentage_filled: ((freeUserCount / 2000) * 100).toFixed(2)
+    });
+  } catch (error) {
+    console.error("Error fetching free user count:", error.stack);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// Get user login statistics
+const getUserLoginStats = async (req, res) => {
+  try {
+    const userId = req.params.userId;
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    const stats = await db.selectAll(
+      "tbl_login_activity",
+      "*",
+      "user_id = ?",
+      [userId],
+      "login_time DESC"
+    );
+
+    const statsWithDuration = stats.map(stat => {
+      let duration = null;
+      if (stat.login_time && stat.logout_time) {
+        const loginTime = new Date(stat.login_time);
+        const logoutTime = new Date(stat.logout_time);
+        duration = Math.round((logoutTime - loginTime) / 1000 / 60); // Duration in minutes
+      }
+      return {
+        ...stat,
+        session_duration_minutes: duration
+      };
+    });
+
+    res.json({
+      message: "User login statistics retrieved",
+      user_id: userId,
+      total_sessions: stats.length,
+      stats: statsWithDuration
+    });
+  } catch (err) {
+    console.error("Error fetching user login stats:", err.stack);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// Get overall statistics
+const getOverallStats = async (req, res) => {
+  try {
+    // Get total users
+    const totalUsers = await db.selectAll("tbl_users", "COUNT(*) as count", "");
+    const total = totalUsers.length > 0 ? totalUsers[0].count : 0;
+
+    // Get free users
+    const freeUsers = await db.selectAll("tbl_users", "COUNT(*) as count", "is_free_user = 1");
+    const freeCount = freeUsers.length > 0 ? freeUsers[0].count : 0;
+
+    // Get paid users
+    const paidCount = total - freeCount;
+
+    // Get today's logins
+    const today = new Date().toISOString().split('T')[0];
+    const todayLogins = await db.selectAll(
+      "tbl_login_activity",
+      "COUNT(*) as count",
+      "login_date = ?",
+      [today]
+    );
+    const todayLoginCount = todayLogins.length > 0 ? todayLogins[0].count : 0;
+
+    // Get average session duration
+    const avgSession = await db.selectAll(
+      "tbl_login_activity",
+      "AVG(TIMESTAMPDIFF(MINUTE, login_time, logout_time)) as avg_duration",
+      "logout_time IS NOT NULL"
+    );
+    const avgDuration = avgSession.length > 0 ? Math.round(avgSession[0].avg_duration) : 0;
+
+    res.json({
+      message: "Overall statistics retrieved",
+      statistics: {
+        total_users: total,
+        free_users: freeCount,
+        paid_users: paidCount,
+        free_user_slots_remaining: Math.max(0, 2000 - freeCount),
+        today_logins: todayLoginCount,
+        average_session_duration_minutes: avgDuration,
+        free_user_percentage: ((freeCount / 2000) * 100).toFixed(2)
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching overall stats:", error.stack);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
 module.exports = {
   adminSignup,
   adminLogin,
@@ -453,4 +565,7 @@ module.exports = {
   updateUser,
   createUserAndSendCredentials,
   checkTrialExpirations,
+  getFreeUserCount,
+  getUserLoginStats,
+  getOverallStats,
 };

@@ -4,7 +4,7 @@ const { smtpHost, smtpPort, smtpUser, smtpPass } = require("../config/dotenvConf
 const transporter = nodemailer.createTransport({
   host: smtpHost,
   port: smtpPort,
-  secure: true, // Use SSL
+  secure: false, // Use SSL
   auth: {
     user: smtpUser,
     pass: smtpPass,

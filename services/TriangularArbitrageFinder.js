@@ -6,10 +6,10 @@ class TriangularArbitrageFinder {
     this.exchangeNames = [ "bybit", "okx", "kucoin", "gate.io","binance"]; // Start with just Binance for testing
     this.baseCurrencies = ["USDT"]; // Start with just USDT
     this.tradingCoins = ["BTC", "ETH", "ADA", "DOT", "MATIC"]; // More coins for better chances
-    this.MIN_PROFIT_PERCENTAGE = -10; // Very low threshold for testing (even losses)
-    this.MIN_VOLUME = 1000; // Very low volume requirement
+    this.MIN_PROFIT_PERCENTAGE = -2; // Very low threshold for testing (even losses)
+    this.MIN_VOLUME = 500000; // Very low volume requirement
     this.STARTING_AMOUNT = 1000;
-    this.MAX_SLIPPAGE = 0.1;
+    this.MAX_SLIPPAGE = 3;
     console.log("🔧 Configuration:", {
       exchanges: this.exchangeNames,
       baseCurrencies: this.baseCurrencies,
