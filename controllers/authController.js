@@ -23,7 +23,7 @@ const googleClient = new OAuth2Client({
     : process.env.GOOGLE_REDIRECT_URI_DEV,
 });
 
-// User Signup (Regular Email/Password)
+// User Signup (Regular Email/Password) - FREE FOR ALL
 const signup = async (req, res) => {
   try {
     const { name, email, password, confirmPassword } = req.body;
@@ -40,21 +40,10 @@ const signup = async (req, res) => {
       return res.status(400).json({ message: "Email is already registered. Please log in." });
     }
 
-    // Check if free user limit (2000 users) has been reached
-    const result = await db.selectAll("tbl_users", "COUNT(*) as count", "");
-    const userCount = result.length > 0 ? result[0].count : 0;
-    
-    if (userCount >= 2000) {
-      return res.status(400).json({ 
-        message: "Free user limit reached (2000 users). Please check back later for updates.",
-        limitReached: true 
-      });
-    }
-
     // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert new user into the database
+    // Insert new user into the database - FREE ACCESS FOR ALL USERS
     const newUser = await db.insert("tbl_users", {
       name,
       email: normalizedEmail,
@@ -69,7 +58,7 @@ const signup = async (req, res) => {
     await sendWelcomeEmail(name, normalizedEmail);
 
     res.status(201).json({ 
-      message: "User registered successfully! Welcome to Arbilo - Your free access is ready.",
+      message: "User registered successfully! Welcome to Arbilo - Enjoy free access to all features.",
       is_free_user: true
     });
   } catch (err) {
@@ -192,19 +181,8 @@ const googleLogin = async (req, res) => {
     let user = await db.select("tbl_users", "*", "email = ?", [normalizedEmail]);
 
     if (!user) {
-      // Check if free user limit (2000 users) has been reached
-      const result = await db.selectAll("tbl_users", "COUNT(*) as count", "");
-      const userCount = result.length > 0 ? result[0].count : 0;
-      
-      if (userCount >= 2000) {
-        return res.status(400).json({ 
-          message: "Free user limit reached (2000 users). Please check back later for updates.",
-          limitReached: true 
-        });
-      }
-
       console.log('Creating new user for:', normalizedEmail);
-      // Create new user
+      // Create new user - FREE ACCESS FOR ALL USERS
       const newUserData = {
         name,
         email: normalizedEmail,

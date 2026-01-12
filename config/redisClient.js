@@ -1,70 +1,83 @@
-// const redis = require('redis');
-// const { redisHost, redisPort } = require('./dotenvConfig');
+/**
+ * In-Memory Cache Client
+ * This provides a Redis-like interface for caching data in memory
+ * All users will see the same cached data with consistent timestamps
+ */
 
-// // Constants
-// const MAX_RETRIES = 20;
-// const MAX_ATTEMPTS = 5;
-// const RECONNECT_BASE_DELAY = 100;
-// const MAX_RECONNECT_DELAY = 3000;
-// const CONNECTION_RETRY_DELAY = 2000;
+class InMemoryCacheClient {
+    constructor() {
+        this.cache = new Map();
+        this.expiry = new Map();
+        console.log('✅ In-Memory Cache initialized');
+    }
 
-// const redisClient = redis.createClient({
-//   socket: {
-//     host: redisHost || '127.0.0.1',
-//     port: redisPort || 6379,
-//     reconnectStrategy: (retries) => {
-//       if (retries > MAX_RETRIES) {
-//         console.error('Max Redis reconnect attempts reached');
-//         return new Error('Max reconnect attempts reached');
-//       }
-//       const delay = Math.min(retries * RECONNECT_BASE_DELAY, MAX_RECONNECT_DELAY);
-//       console.log(`Retrying Redis connection, attempt ${retries}, delay ${delay}ms`);
-//       return delay;
-//     },
-//   },
-//   maxRetriesPerRequest: 10,
-// });
+    async get(key) {
+        const now = Date.now();
+        const expiryTime = this.expiry.get(key);
+        
+        // Check if key has expired
+        if (expiryTime && now > expiryTime) {
+            this.cache.delete(key);
+            this.expiry.delete(key);
+            return null;
+        }
+        
+        return this.cache.get(key) || null;
+    }
 
-// redisClient.on('connect', () => {
-//   console.log('✅ Connected to Redis');
-// });
+    async set(key, value) {
+        this.cache.set(key, value);
+        return 'OK';
+    }
 
-// redisClient.on('error', (error) => {
-//   console.error('❌ Redis Connection Error:', error);
-// });
+    async setEx(key, ttlSeconds, value) {
+        this.cache.set(key, value);
+        this.expiry.set(key, Date.now() + (ttlSeconds * 1000));
+        return 'OK';
+    }
 
-// redisClient.on('reconnecting', () => {
-//   console.log('🔄 Reconnecting to Redis...');
-// });
+    async del(key) {
+        this.cache.delete(key);
+        this.expiry.delete(key);
+        return 1;
+    }
 
-// redisClient.on('ready', () => {
-//   console.log('✅ Redis client ready');
-// });
+    async exists(key) {
+        const now = Date.now();
+        const expiryTime = this.expiry.get(key);
+        
+        if (expiryTime && now > expiryTime) {
+            this.cache.delete(key);
+            this.expiry.delete(key);
+            return 0;
+        }
+        
+        return this.cache.has(key) ? 1 : 0;
+    }
 
-// redisClient.on('end', () => {
-//   console.log('❌ Redis connection closed');
-// });
+    async ttl(key) {
+        const expiryTime = this.expiry.get(key);
+        if (!expiryTime) return -1;
+        
+        const ttl = Math.ceil((expiryTime - Date.now()) / 1000);
+        return ttl > 0 ? ttl : -2;
+    }
 
-// const connectWithRetry = async () => {
-//   let attempts = 0;
+    async keys(pattern) {
+        // Simple pattern matching for "*" only
+        if (pattern === '*') {
+            return Array.from(this.cache.keys());
+        }
+        return [];
+    }
 
-//   while (attempts < MAX_ATTEMPTS) {
-//     try {
-//       await redisClient.connect();
-//       console.log('✅ Redis connection established');
-//       return;
-//     } catch (err) {
-//       console.error(`❌ Redis connection attempt ${attempts + 1} failed:`, err);
-//       attempts++;
-//       if (attempts === MAX_ATTEMPTS) {
-//         console.error('❌ Max Redis connection attempts reached. Falling back to in-memory cache.');
-//         return;
-//       }
-//       await new Promise((resolve) => setTimeout(resolve, CONNECTION_RETRY_DELAY));
-//     }
-//   }
-// };
+    async flushAll() {
+        this.cache.clear();
+        this.expiry.clear();
+        return 'OK';
+    }
+}
 
-// connectWithRetry();
+const cacheClient = new InMemoryCacheClient();
 
-// module.exports = redisClient;
+module.exports = cacheClient;
