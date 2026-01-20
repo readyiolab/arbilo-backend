@@ -47,3 +47,23 @@ GROUP BY user_id, login_date;
 -- FROM tbl_login_activity
 -- WHERE user_id = ? AND logout_time IS NOT NULL
 -- ORDER BY login_time DESC;
+
+-- 3. Support and Feedback Tables
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255),
+  email VARCHAR(255),
+  subject VARCHAR(255),
+  message TEXT,
+  status VARCHAR(50) DEFAULT 'open',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS feedback (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255),
+  email VARCHAR(255),
+  rating INT,
+  message TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

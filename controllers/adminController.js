@@ -225,12 +225,12 @@ const toggleUserActiveStatus = async (req, res) => {
     const updatedFields =
       is_active === 0
         ? {
-            is_active,
-            subscription_type: null,
-            subscription_status: null,
-            subscription_start_date: null,
-            subscription_end_date: null,
-          }
+          is_active,
+          subscription_type: null,
+          subscription_status: null,
+          subscription_start_date: null,
+          subscription_end_date: null,
+        }
         : { is_active }; // If user is being activated, no need to change subscription fields
 
     // Update the user's active status and subscription fields in the database
@@ -555,6 +555,28 @@ const getOverallStats = async (req, res) => {
   }
 };
 
+// Get Support Tickets
+const getSupportTickets = async (req, res) => {
+  try {
+    const tickets = await db.selectAll("tbl_support_tickets", "*", "", [], "ORDER BY created_at DESC");
+    res.json({ tickets });
+  } catch (error) {
+    console.error("Error fetching support tickets:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// Get Feedback
+const getFeedback = async (req, res) => {
+  try {
+    const feedback = await db.selectAll("tbl_feedback", "*", "", [], "ORDER BY created_at DESC");
+    res.json({ feedback });
+  } catch (error) {
+    console.error("Error fetching feedback:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
 module.exports = {
   adminSignup,
   adminLogin,
@@ -567,5 +589,8 @@ module.exports = {
   checkTrialExpirations,
   getFreeUserCount,
   getUserLoginStats,
+  getUserLoginStats,
   getOverallStats,
+  getSupportTickets,
+  getFeedback,
 };

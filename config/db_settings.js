@@ -72,7 +72,7 @@ class Database {
     const fields = Object.keys(data).map(key => `\`${key}\``).join(',');
     const placeholders = Object.keys(data).map(() => '?').join(',');
     const values = Object.values(data);
-    
+
     const sql = `INSERT INTO ${tbl_name} (${fields}) VALUES (${placeholders})`;
     if (print) {
       console.log('SQL:', sql, 'Params:', values);
@@ -98,11 +98,11 @@ class Database {
     if (where !== '') {
       whereSQL = ` WHERE ${where}`;
     }
-    
+
     const sets = Object.entries(form_data).map(([column]) => `\`${column}\` = ?`);
     const values = Object.values(form_data);
     const queryParams = [...values, ...params];
-    
+
     const sql = `UPDATE ${table_name} SET ${sets.join(', ')}${whereSQL}`;
     if (print) {
       console.log('SQL:', sql, 'Params:', queryParams);

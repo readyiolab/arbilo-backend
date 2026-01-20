@@ -183,19 +183,55 @@ const googleLogin = async (req, res) => {
     if (!user) {
       console.log('Creating new user for:', normalizedEmail);
       // Create new user - FREE ACCESS FOR ALL USERS
-      const newUserData = {
+      // Start with minimal required fields
+      let newUserData = {
         name,
         email: normalizedEmail,
-        password: null, // Password is null for Google users
         is_active: 1,
         is_verified: 1,
-        is_free_user: 1,
         created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
-        google_id: googleId,
-        session_token: null,
       };
 
-      await db.insert("tbl_users", newUserData);
+      // Try to insert with all fields first
+      try {
+        newUserData.google_id = googleId;
+        newUserData.is_free_user = 1;
+        await db.insert("tbl_users", newUserData);
+      } catch (insertErr) {
+        console.error('First insert attempt failed:', insertErr.message);
+        
+        // Handle missing google_id column
+        if (insertErr.code === "ER_BAD_FIELD_ERROR" && insertErr.message?.includes("google_id")) {
+          console.log('Retrying insert without google_id');
+          delete newUserData.google_id;
+          try {
+            await db.insert("tbl_users", newUserData);
+          } catch (insertErr2) {
+            if (insertErr2.code === "ER_BAD_NULL_ERROR" || insertErr2.message?.includes("password")) {
+              console.log('Retrying insert with empty password');
+              newUserData.password = '';
+              await db.insert("tbl_users", newUserData);
+            } else {
+              throw insertErr2;
+            }
+          }
+        }
+        // Handle NOT NULL password constraint
+        else if (insertErr.code === "ER_BAD_NULL_ERROR" || insertErr.message?.includes("password")) {
+          console.log('Retrying insert with empty password');
+          newUserData.password = '';
+          await db.insert("tbl_users", newUserData);
+        }
+        // Handle missing is_free_user column
+        else if (insertErr.code === "ER_BAD_FIELD_ERROR" && insertErr.message?.includes("is_free_user")) {
+          console.log('Retrying insert without is_free_user');
+          delete newUserData.is_free_user;
+          await db.insert("tbl_users", newUserData);
+        }
+        else {
+          throw insertErr;
+        }
+      }
 
       // Fetch the newly created user
       user = await db.select("tbl_users", "*", "email = ?", [normalizedEmail]);
@@ -206,14 +242,21 @@ const googleLogin = async (req, res) => {
 
       await sendWelcomeEmail(name, normalizedEmail);
     } else if (!user.google_id) {
-      // Link Google ID to existing user (optional, based on your requirements)
-      await db.update(
-        "tbl_users",
-        { google_id: googleId },
-        "id = ?",
-        [user.id]
-      );
-      user.google_id = googleId;
+      // Link Google ID to existing user - try to update but ignore if column doesn't exist
+      try {
+        await db.update(
+          "tbl_users",
+          { google_id: googleId },
+          "id = ?",
+          [user.id]
+        );
+        user.google_id = googleId;
+      } catch (updateErr) {
+        // Ignore error if google_id column doesn't exist
+        if (updateErr.code !== "ER_BAD_FIELD_ERROR") {
+          console.warn('Could not update google_id:', updateErr.message);
+        }
+      }
     }
 
     // Generate JWT token
@@ -256,15 +299,39 @@ const googleLogin = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error("Google login error:", err.stack);
+    console.error("Google login error:", err.message);
+    console.error("Google login error stack:", err.stack);
+    console.error("Google login error code:", err.code);
+    
+    // Handle specific database errors
     if (err.code === "ER_BAD_NULL_ERROR") {
       return res.status(500).json({
-        message: "Database error: Password column cannot be null. Please contact support."
+        message: "Database error: Password column cannot be null. Please run the database migration to fix this."
       });
     }
+    
+    if (err.code === "ER_BAD_FIELD_ERROR" || err.message?.includes("Unknown column")) {
+      return res.status(500).json({
+        message: "Database schema error: Missing required column. Please run the database migration."
+      });
+    }
+    
+    // Handle Google token verification errors
+    if (err.message?.includes("Token used too late") || err.message?.includes("Token used too early")) {
+      return res.status(400).json({
+        message: "Google token has expired. Please try again."
+      });
+    }
+    
+    if (err.message?.includes("Invalid token signature") || err.message?.includes("Wrong recipient")) {
+      return res.status(400).json({
+        message: "Invalid Google token. Please try again."
+      });
+    }
+    
     res.status(500).json({ 
       message: "Failed to process Google login",
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      error: process.env.NODE_ENV !== 'production' ? err.message : undefined
     });
   }
 };

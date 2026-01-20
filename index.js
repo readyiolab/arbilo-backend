@@ -6,11 +6,44 @@ const adminRoutes = require("./routes/adminRoutes");
 const arbitrageRoutes = require("./routes/arbitrageRoutes");
 const blogRoutes = require("./routes/blogRoutes");
 const newsletterRoutes = require("./routes/newsletterRoutes");
+const commonRoutes = require("./routes/commonRoutes");
+const db = require("./config/db_settings");
 
+// Database Table Initialization
+const initDb = async () => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS support_tickets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255),
+        email VARCHAR(255),
+        subject VARCHAR(255),
+        message TEXT,
+        status VARCHAR(50) DEFAULT 'open',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS feedback (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255),
+        email VARCHAR(255),
+        rating INT,
+        message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log("Support and Feedback tables checked/created");
+  } catch (error) {
+    console.error("Error initializing DB tables:", error);
+  }
+};
+
+initDb();
 
 const app = express();
 const server = http.createServer(app);
-const port = 6000;
+const port = 5000;
 
 const allowedOrigins = [
   "https://arbilo.com",
@@ -71,6 +104,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/arbitrage", arbitrageRoutes);
 app.use("/api/blogs", blogRoutes);
 app.use("/api/newsletter", newsletterRoutes);
+app.use("/api", commonRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
