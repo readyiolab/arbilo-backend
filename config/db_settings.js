@@ -1,12 +1,12 @@
 const mysql = require('mysql');
-// const { dbHost, dbUser, dbPass, dbName } = require('./dotenvConfig');
+const { dbHost, dbUser, dbPass, dbName } = require('./dotenvConfig');
 
 class Database {
   constructor() {
-    this.host = 'localhost';
-    this.username = 'root';
-    this.password = '';
-    this.database = 'db_arbilo';
+    this.host = dbHost;
+    this.username = dbUser;
+    this.password = dbPass;
+    this.database = dbName;
 
     this.conn = mysql.createConnection({
       host: this.host,
