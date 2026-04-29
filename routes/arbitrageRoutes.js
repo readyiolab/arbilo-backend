@@ -6,19 +6,21 @@ const combinedMiddleware = require('../middleware/userMiddleware');
 
 const cryptoService = new CryptoArbitrageService();
 
-// Fetch ArbiTrack data (single coin highest/lowest)
+// Fetch functions
 const fetchArbiTrackData = async () => {
     return await cryptoService.getArbiTrackData();
 };
 
-// Fetch ArbiPair data (coin pair arbitrage)
 const fetchArbiPairData = async () => {
     return await cryptoService.getArbitrageOpportunities(100000);
 };
 
-// 🟢 Start auto-refreshing cache every 5 minutes (Perfect Logic - Shared for all users)
-CacheService.refreshCachePeriodically(fetchArbiTrackData, CacheService.CACHE_KEYS.ARBI_TRACK);
-CacheService.refreshCachePeriodically(fetchArbiPairData, CacheService.CACHE_KEYS.ARBI_PAIR);
+// 🟢 PERFECT SYNC: Start Master Refresh Cycle for all signals
+// This ensures all users see the exact same timing and results
+CacheService.startMasterRefresh([
+    { key: CacheService.CACHE_KEYS.ARBI_TRACK, fetchFunction: fetchArbiTrackData },
+    { key: CacheService.CACHE_KEYS.ARBI_PAIR, fetchFunction: fetchArbiPairData }
+]);
 
 // Get cache metadata (timestamp info) - for syncing all users
 router.get('/cache-info', combinedMiddleware, async (req, res) => {
@@ -36,7 +38,7 @@ router.get('/cache-info', combinedMiddleware, async (req, res) => {
     }
 });
 
-// ArbiTrack API - Data for individual coins
+// ArbiTrack API
 router.get('/arbitrack', combinedMiddleware, async (req, res) => {
     try {
         const data = await CacheService.getOrSetCache(
@@ -60,7 +62,7 @@ router.get('/arbitrack', combinedMiddleware, async (req, res) => {
     }
 });
 
-// ArbiPair API - Data for coin pairs
+// ArbiPair API
 router.get('/:investment?', combinedMiddleware, async (req, res) => {
     try {
         const investment = parseFloat(req.params.investment) || 100000;
