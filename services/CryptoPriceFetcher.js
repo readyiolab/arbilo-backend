@@ -3,17 +3,16 @@ const ccxt = require('ccxt');
 class CryptoArbitrageFinder {
     constructor() {
         this.exchangeNames = [
-            'binance', 'bybit', 'p2b', 'xt', 'woo', 'okx', 
-            'crypto.com', 'gate.io', 'bitget', 'mexc', 'htx',
-            'kraken', 'kucoin', 'bitfinex', 'bitmart', 'bitmex',
-            'poloniex', 'probit', 'phemex', 'whitebit', 
-            'ascendex', 'bitget'
+            'binance', 'bybit', 'p2b', 'xt', 'woo', 'mexc',
+            'gateio', 'bitget', 'htx', 'kucoin', 'phemex',
+            'whitebit'
         ];
 
         this.coinSymbols = [
-             'ETH', 'XRP', 'ADA', 'DOT', 'SOL', 'DOGE', 
-            'SHIB', 'LTC', 'LINK', 'MATIC', 'AVAX', 'XLM', 
-            'UNI', 'BCH', 'FIL', 'VET', 'ALGO', 'ATOM', 'ICP'
+            'ETH', 'XRP', 'ADA', 'DOT', 'SOL', 'DOGE', 'SHIB', 'LTC',
+            'LINK', 'POL', 'AVAX', 'XLM', 'UNI', 'BCH', 'FIL', 'VET',
+            'ALGO', 'ATOM', 'ICP', 'PEPE', 'BONK', 'TIA', 'SEI', 'SUI',
+            'NEAR', 'INJ', 'OP', 'ARB', 'FET', 'RNDR'
         ];
 
         this.MIN_VOLUME = 100000; // Minimum 24h volume in USDT
@@ -21,25 +20,35 @@ class CryptoArbitrageFinder {
 
     async fetchPrices() {
         let results = {};
-    
+
         const exchanges = await Promise.allSettled(
             this.exchangeNames.map(async (exchangeName) => {
                 try {
-                    const exchange = new ccxt[exchangeName]();
+                    const exchange = new ccxt[exchangeName]({ timeout: 30000 });
                     await exchange.loadMarkets();
+
+                    if (!exchange.has['fetchTicker']) {
+                        console.log(`⚠️ ${exchangeName} does not support fetchTicker, skipping.`);
+                        return null;
+                    }
+
                     exchange.options['fetchTicker'] = { timestamp: Date.now() };
                     return exchange;
                 } catch (err) {
-                    console.log(`❌ Error initializing ${exchangeName}: ${err.message}`);
+                    if (err.message.includes('403') || err.message.includes('restricted')) {
+                        console.log(`⚠️ ${exchangeName} is restricted in this region (403).`);
+                    } else {
+                        console.log(`❌ Error initializing ${exchangeName}: ${err.message}`);
+                    }
                     return null;
                 }
             })
         );
-    
+
         const validExchanges = exchanges
             .filter(res => res.status === 'fulfilled' && res.value !== null)
             .map(res => res.value);
-    
+
         await Promise.all(validExchanges.map(async (exchange) => {
             const exchangeName = exchange.id;
             await Promise.allSettled(this.coinSymbols.map(async (coin) => {
@@ -47,10 +56,10 @@ class CryptoArbitrageFinder {
                 if (exchange.has['fetchTicker'] && exchange.markets[pair]) {
                     try {
                         let ticker = await exchange.fetchTicker(pair);
-                        
+
                         // Check if 24h volume meets minimum requirement
                         const volumeUSDT = ticker.quoteVolume || (ticker.baseVolume * ticker.last);
-                        
+
                         if (volumeUSDT >= this.MIN_VOLUME) {
                             if (!results[coin]) results[coin] = [];
                             results[coin].push({
@@ -69,7 +78,7 @@ class CryptoArbitrageFinder {
                 }
             }));
         }));
-    
+
         return this.calculateArbitrageOpportunities(results);
     }
 
@@ -79,13 +88,13 @@ class CryptoArbitrageFinder {
         for (const [coin, prices] of Object.entries(results)) {
             if (prices.length < 2) continue;
 
-            const highest = prices.reduce((max, current) => 
+            const highest = prices.reduce((max, current) =>
                 current.price > max.price ? current : max
             );
-            const lowest = prices.reduce((min, current) => 
+            const lowest = prices.reduce((min, current) =>
                 current.price < min.price ? current : min
             );
-            
+
             const profitPercentage = ((highest.price - lowest.price) / lowest.price) * 100;
 
             arbitrageOpportunities[coin] = {

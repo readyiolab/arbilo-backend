@@ -5,6 +5,7 @@ class CacheService {
         ARBI_TRACK: 'arbitrack_data',
         ARBI_PAIR: 'arbipair_data',
         TRIANGULAR_ARBI: 'triangular_arbi',
+        SPOT_FUTURES: 'spot_futures_data',
         CACHE_METADATA: 'cache_metadata'  // Stores last update timestamp
     };
     

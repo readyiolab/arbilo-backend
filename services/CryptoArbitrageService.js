@@ -1,106 +1,121 @@
 const ccxt = require('ccxt');
+const config = require('../config/arbitrageConfig');
 
 class CryptoArbitrageService {
     constructor() {
-        this.exchangeNames = [
-            'binance', 
-            'bybit', 
-            'p2b',
-            'xt',
-            'woo',
-            'okx', 
-            'crypto.com', 
-            'gate.io', 
-            'bitget', 
-            'mexc', 
-            'htx',
-            'kraken', 
-            'kucoin', 
-            'bitfinex', 
-            'bitmart', 
-            'bitmex',
-            'poloniex', 
-            'probit',
-            'phemex',
-            'whitebit', 
-            'ascendex',
-            'bitget',
-        ];
-
-        this.coinSymbols = [
-             'ETH', 'XRP', 'ADA', 'DOT', 'SOL', 'DOGE', 'SHIB', 'LTC', 'LINK',
-            'MATIC', 'AVAX', 'XLM', 'UNI', 'BCH', 'FIL', 'VET', 'ALGO', 'ATOM', 'ICP'
-        ];
-
-        this.MIN_VOLUME = 100000; // Minimum 24h volume in USDT
-        this.MAX_RETRIES = 3;
-        this.RETRY_DELAY = 500;
+        this.exchangeNames = config.EXCHANGE_NAMES;
+        this.coinSymbols = config.COIN_SYMBOLS;
+        this.MIN_VOLUME = config.MIN_VOLUME;
+        this.MAX_RETRIES = config.MAX_RETRIES;
+        this.RETRY_DELAY = config.RETRY_DELAY;
+        this.MAX_PRICE_AGE = config.MAX_PRICE_AGE;
         this.exchanges = {};
     }
 
     async initializeExchange(exchangeName) {
         try {
             if (!this.exchanges[exchangeName]) {
-                this.exchanges[exchangeName] = new ccxt[exchangeName]({ timeout: 20000 });
-                await this.exchanges[exchangeName].loadMarkets();
+                const exchange = new ccxt[exchangeName]({ 
+                    timeout: 30000,
+                    enableRateLimit: true 
+                });
+                await exchange.loadMarkets();
+
+                if (!exchange.has['fetchTicker'] && !exchange.has['fetchTickers']) {
+                    return null;
+                }
+
+                this.exchanges[exchangeName] = exchange;
             }
+            return this.exchanges[exchangeName];
         } catch (err) {
             console.warn(`⚠️ Skipping ${exchangeName}: ${err.message}`);
             delete this.exchanges[exchangeName];
-        }
-    }
-
-    async delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    async fetchMarketDataWithRetry(exchange, pair, retries = 0) {
-        try {
-            await this.delay(this.RETRY_DELAY);
-            const ticker = await exchange.fetchTicker(pair);
-            return {
-                price: ticker.last,
-                volume: ticker.quoteVolume || ticker.baseVolume * ticker.last, // Convert to USDT volume if needed
-                timestamp: Date.now()
-            };
-        } catch (error) {
-            if (retries < this.MAX_RETRIES) {
-                console.log(`🔄 Retrying ${pair} on ${exchange.name} (${retries + 1}/${this.MAX_RETRIES})`);
-                await this.delay(this.RETRY_DELAY * (retries + 1));
-                return this.fetchMarketDataWithRetry(exchange, pair, retries + 1);
-            }
-            console.error(`❌ Failed to fetch ${pair} from ${exchange.name}: ${error.message}`);
             return null;
         }
     }
 
     async fetchExchangePrices(exchangeName) {
-        await this.initializeExchange(exchangeName);
-        const exchange = this.exchanges[exchangeName];
+        const exchange = await this.initializeExchange(exchangeName);
         if (!exchange) return {};
 
+        const symbols = this.coinSymbols.map(coin => `${coin}/USDT`);
+        const availableSymbols = symbols.filter(s => exchange.markets[s]);
+        
+        if (availableSymbols.length === 0) return {};
+
         const marketData = {};
-        const fetchPromises = this.coinSymbols.map(async (coin) => {
-            const pair = `${coin}/USDT`;
-            if (!exchange.markets[pair]) {
-                console.log(`⚠️ ${exchangeName} does not support ${pair}`);
-                return;
-            }
-
-            try {
-                const data = await this.fetchMarketDataWithRetry(exchange, pair);
-                if (data && data.volume >= this.MIN_VOLUME) {
-                    marketData[coin] = data;
-                } else if (data) {
-                    console.log(`⚠️ ${pair} on ${exchangeName} has insufficient volume (${data.volume.toFixed(2)} USDT)`);
+        try {
+            let tickers = {};
+            if (exchange.has['fetchTickers']) {
+                tickers = await exchange.fetchTickers(availableSymbols);
+            } else {
+                for (const symbol of availableSymbols) {
+                    try {
+                        tickers[symbol] = await exchange.fetchTicker(symbol);
+                    } catch (e) {}
                 }
-            } catch (err) {
-                console.log(`❌ Error fetching ${pair} from ${exchangeName}: ${err.message}`);
             }
-        });
 
-        await Promise.all(fetchPromises);
+            for (const symbol of availableSymbols) {
+                const ticker = tickers[symbol];
+                if (!ticker || !ticker.last) continue;
+
+                const coin = symbol.split('/')[0];
+                const volumeUSDT = ticker.quoteVolume || (ticker.baseVolume * ticker.last);
+
+                if (volumeUSDT >= this.MIN_VOLUME) {
+                    marketData[coin] = {
+                        price: ticker.last,
+                        bid: ticker.bid || ticker.last,
+                        ask: ticker.ask || ticker.last,
+                        volume: volumeUSDT,
+                        timestamp: Date.now()
+                    };
+                }
+            }
+        } catch (err) {
+            console.error(`❌ Bulk fetch error for ${exchangeName}: ${err.message}`);
+        }
+
         return marketData;
+    }
+
+    /**
+     * Filters out glitchy/outlier prices to prevent impossible arbitrage results.
+     * Uses median-based filtering (more robust than average).
+     */
+    filterOutliers(cryptoData) {
+        const filteredData = JSON.parse(JSON.stringify(cryptoData));
+        const coinPrices = {};
+
+        // Collect all prices for each coin
+        for (const exchange of Object.keys(filteredData)) {
+            for (const coin of Object.keys(filteredData[exchange])) {
+                if (!coinPrices[coin]) coinPrices[coin] = [];
+                coinPrices[coin].push({ exchange, price: filteredData[exchange][coin].price });
+            }
+        }
+
+        // Check for outliers coin by coin
+        for (const coin of Object.keys(coinPrices)) {
+            const prices = coinPrices[coin].map(p => p.price).sort((a, b) => a - b);
+            if (prices.length < 3) continue; // Not enough data to determine outliers reliably
+
+            const median = prices[Math.floor(prices.length / 2)];
+            
+            // Discard prices that are > 50% different from the median
+            // Arbitrage is usually < 5%, so 50% is a safe "glitch" threshold
+            for (const p of coinPrices[coin]) {
+                const deviation = Math.abs(p.price - median) / median;
+                if (deviation > 0.5) {
+                    console.warn(`🚨 Discarding outlier price for ${coin} on ${p.exchange}: $${p.price} (Median: $${median})`);
+                    delete filteredData[p.exchange][coin];
+                }
+            }
+        }
+
+        return filteredData;
     }
 
     async fetchAllPrices() {
@@ -117,14 +132,20 @@ class CryptoArbitrageService {
         });
 
         await Promise.all(exchangePromises);
-        return cryptoData;
+        
+        // Apply outlier detection before returning
+        return this.filterOutliers(cryptoData);
     }
 
-    calculateProfitForPair(investment, minPrice1, minPrice2, maxPrice1, maxPrice2) {
-        const coin1Bought = investment / minPrice1;
-        const moneyAfterSellingCoin1 = coin1Bought * maxPrice1;
-        const coin2Bought = moneyAfterSellingCoin1 / maxPrice2;
-        const finalAmount = coin2Bought * minPrice2;
+    isPriceStale(timestamp) {
+        return (Date.now() - timestamp) > this.MAX_PRICE_AGE;
+    }
+
+    calculateProfitForPair(investment, buyAsk1, sellBid1, buyAsk2, sellBid2) {
+        const coin1Bought = investment / buyAsk1;
+        const moneyAfterSellingCoin1 = coin1Bought * sellBid1;
+        const coin2Bought = moneyAfterSellingCoin1 / buyAsk2;
+        const finalAmount = coin2Bought * sellBid2;
 
         const profit = finalAmount - investment;
         return { profit, profitPercentage: (profit / investment) * 100 };
@@ -141,66 +162,52 @@ class CryptoArbitrageService {
     }
 
     calculateArbitrageProfit(cryptoData, initialInvestment) {
-        if (!cryptoData || Object.keys(cryptoData).length === 0) {
-            console.warn("⚠️ No crypto data available");
-            return [];
-        }
+        if (!cryptoData || Object.keys(cryptoData).length === 0) return [];
 
         const results = [];
         const coinPairs = this.createCoinPairs();
 
         for (const [coin1, coin2] of coinPairs) {
-            const validExchanges = this.exchangeNames.filter(exchange =>
-                cryptoData[exchange]?.[coin1]?.price > 0 && 
-                cryptoData[exchange]?.[coin2]?.price > 0
-            );
-
-            if (validExchanges.length < 2) continue;
-
-            const opportunities = validExchanges.map(exchange => ({
-                exchange,
-                price1: cryptoData[exchange][coin1]?.price,
-                price2: cryptoData[exchange][coin2]?.price,
-                volume1: cryptoData[exchange][coin1]?.volume,
-                volume2: cryptoData[exchange][coin2]?.volume
-            })).filter(o => 
-                o.price1 && 
-                o.price2 && 
-                o.volume1 >= this.MIN_VOLUME && 
-                o.volume2 >= this.MIN_VOLUME
-            );
+            const opportunities = this.exchangeNames
+                .map(exchange => {
+                    const c1 = cryptoData[exchange]?.[coin1];
+                    const c2 = cryptoData[exchange]?.[coin2];
+                    if (!c1 || !c2 || this.isPriceStale(c1.timestamp) || this.isPriceStale(c2.timestamp)) return null;
+                    return { exchange, c1, c2 };
+                })
+                .filter(Boolean);
 
             if (opportunities.length < 2) continue;
 
-            opportunities.sort((a, b) => a.price1 - b.price1);
-            const minOpp = opportunities[0];
-            opportunities.sort((a, b) => b.price1 - a.price1);
-            const maxOpp = opportunities[0];
+            const bestBuy = [...opportunities].sort((a, b) => a.c1.ask - b.c1.ask)[0];
+            const bestSell = [...opportunities].sort((a, b) => b.c1.bid - a.c1.bid)[0];
 
-            if (minOpp && maxOpp && minOpp.exchange !== maxOpp.exchange) {
+            if (bestBuy && bestSell && bestBuy.exchange !== bestSell.exchange) {
                 const profit = this.calculateProfitForPair(
                     initialInvestment,
-                    minOpp.price1, minOpp.price2,
-                    maxOpp.price1, maxOpp.price2
+                    bestBuy.c1.ask,
+                    bestSell.c1.bid,
+                    bestBuy.c2.ask,
+                    bestSell.c2.bid
                 );
 
-                if (profit.profit > 0) {
+                if (profit.profit > 0 && profit.profitPercentage < 100) { // Discard > 100% profit as likely glitch
                     results.push({
                         pair: `${coin1} - ${coin2}`,
                         coin1,
                         coin2,
-                        minExchange: minOpp.exchange,
-                        maxExchange: maxOpp.exchange,
-                        minPrice1: Number(minOpp.price1.toFixed(8)),
-                        minPrice2: Number(minOpp.price2.toFixed(8)),
-                        maxPrice1: Number(maxOpp.price1.toFixed(8)),
-                        maxPrice2: Number(maxOpp.price2.toFixed(8)),
-                        volume1Min: Number(minOpp.volume1.toFixed(2)),
-                        volume2Min: Number(minOpp.volume2.toFixed(2)),
-                        volume1Max: Number(maxOpp.volume1.toFixed(2)),
-                        volume2Max: Number(maxOpp.volume2.toFixed(2)),
-                        profit: Number(profit.profit.toFixed(2)),
-                        profitPercentage: Number(profit.profitPercentage.toFixed(2)),
+                        minExchange: bestBuy.exchange,
+                        maxExchange: bestSell.exchange,
+                        minPrice1: bestBuy.c1.ask,
+                        minPrice2: bestBuy.c2.ask,
+                        maxPrice1: bestSell.c1.bid,
+                        maxPrice2: bestSell.c2.bid,
+                        volume1Min: bestBuy.c1.volume,
+                        volume2Min: bestBuy.c2.volume,
+                        volume1Max: bestSell.c1.volume,
+                        volume2Max: bestSell.c2.volume,
+                        profit: profit.profit,
+                        profitPercentage: profit.profitPercentage,
                         investmentAmount: initialInvestment
                     });
                 }
@@ -210,13 +217,48 @@ class CryptoArbitrageService {
         return results.sort((a, b) => b.profit - a.profit);
     }
 
+    async getArbiTrackData() {
+        const cryptoData = await this.fetchAllPrices();
+        const results = {};
+
+        for (const coin of this.coinSymbols) {
+            const prices = [];
+            for (const exchange of this.exchangeNames) {
+                const data = cryptoData[exchange]?.[coin];
+                if (data && !this.isPriceStale(data.timestamp)) {
+                    prices.push({ exchange, ...data });
+                }
+            }
+
+            if (prices.length < 2) continue;
+
+            const lowest = prices.reduce((min, p) => p.ask < min.ask ? p : min);
+            const highest = prices.reduce((max, p) => p.bid > max.bid ? p : max);
+            const profitPercentage = ((highest.bid - lowest.ask) / lowest.ask) * 100;
+
+            // Discard insane profit percentages as glitches
+            if (profitPercentage > 0 && profitPercentage < 50) {
+                results[coin] = {
+                    coin,
+                    lowestExchange: lowest.exchange,
+                    highestExchange: highest.exchange,
+                    lowestPrice: lowest.ask,
+                    highestPrice: highest.bid,
+                    profitPercentage: profitPercentage,
+                    lowestVolume: lowest.volume,
+                    highestVolume: highest.volume
+                };
+            }
+        }
+
+        return results;
+    }
+
     async getArbitrageOpportunities(investment) {
         try {
-            console.log("🔍 Fetching crypto prices and volumes...");
             const cryptoData = await this.fetchAllPrices();
-            console.log("✅ Data fetched. Calculating arbitrage opportunities...");
             const results = this.calculateArbitrageProfit(cryptoData, investment);
-            return { results: results.slice(0, 20), lastUpdated: new Date().toISOString() };
+            return { results: results.slice(0, 30), lastUpdated: new Date().toISOString() };
         } catch (error) {
             console.error("❌ Error calculating arbitrage opportunities:", error);
             return { results: [], lastUpdated: new Date().toISOString() };

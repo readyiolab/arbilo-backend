@@ -4,6 +4,7 @@ const http = require("http");
 const authRoutes = require("./routes/authRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const arbitrageRoutes = require("./routes/arbitrageRoutes");
+const spotFuturesRoutes = require("./routes/spotFuturesRoutes");
 const blogRoutes = require("./routes/blogRoutes");
 const newsletterRoutes = require("./routes/newsletterRoutes");
 const commonRoutes = require("./routes/commonRoutes");
@@ -48,6 +49,7 @@ const port = 5000;
 const allowedOrigins = [
   "https://arbilo.com",
   "https://www.arbilo.com",
+  "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:3000",
 ];
@@ -102,6 +104,7 @@ app.use((req, res, next) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/arbitrage", arbitrageRoutes);
+app.use("/api/spot-futures", spotFuturesRoutes);
 app.use("/api/blogs", blogRoutes);
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api", commonRoutes);
