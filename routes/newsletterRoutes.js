@@ -12,8 +12,17 @@ const {
 const adminAuthMiddleware = require("../middleware/adminMiddleware");
 const multer = require("multer");
 
-// Configure multer for in-memory file storage
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (/^image\/(jpeg|png|webp)$/.test(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only JPG, PNG, or WEBP uploads are allowed"));
+    }
+  },
+});
 
 router.post("/subscribe", subscribeNewsletter);
 router.get("/confirm", confirmSubscription);

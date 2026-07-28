@@ -432,32 +432,44 @@ const deleteBlog = async (req, res) => {
 // Get all blog posts (Public for published, Admin sees all)
 const getAllBlogs = async (req, res) => {
   try {
-    const isAdmin = !!req.admin; // Check if user is admin
-    const whereClause = isAdmin ? "" : "status='published'";
-
-    // Fetch blog posts
-    const blogs = await db.selectAll(
-      "tbl_blogs",
-      "id, title, excerpt, content, category, image, author, author_bio, status, read_time, tags, is_featured, likes, shares, comments, created_at, updated_at, published_at",
-      whereClause
-    );
-
-    // Parse tags and format date
-    const parsedBlogs = blogs.map((blog) => {
-      console.log("Blog from getAllBlogs:", {
-        id: blog.id,
-        status: blog.status,
-      });
-      return {
-        ...blog,
-        tags: JSON.parse(blog.tags || "[]"),
-        date: blog.published_at
-          ? blog.published_at.toISOString().split("T")[0]
-          : null,
-      };
+    const isAdmin = !!req.admin;
+    const { parsePagination, paginatedResponse } = require("../utils/pagination");
+    const { page, limit, offset } = parsePagination(req.query, {
+      defaultLimit: 20,
+      maxLimit: 50,
     });
 
-    res.json({ blogs: parsedBlogs });
+    const whereClause = isAdmin ? "1=1" : "status = ?";
+    const whereParams = isAdmin ? [] : ["published"];
+
+    const countRow = await db.queryOne(
+      `SELECT COUNT(*) as count FROM tbl_blogs WHERE ${whereClause}`,
+      whereParams
+    );
+    const total = countRow?.count || 0;
+
+    // List endpoint excludes full HTML content for performance
+    const blogs = await db.queryAll(
+      `SELECT id, title, excerpt, category, image, author, author_bio, status, read_time, tags, is_featured, likes, shares, comments, created_at, updated_at, published_at
+       FROM tbl_blogs
+       WHERE ${whereClause}
+       ORDER BY COALESCE(published_at, created_at) DESC
+       LIMIT ? OFFSET ?`,
+      [...whereParams, limit, offset]
+    );
+
+    const parsedBlogs = blogs.map((blog) => ({
+      ...blog,
+      tags: typeof blog.tags === "string" ? JSON.parse(blog.tags || "[]") : blog.tags || [],
+      date: blog.published_at
+        ? new Date(blog.published_at).toISOString().split("T")[0]
+        : null,
+    }));
+
+    res.json({
+      blogs: parsedBlogs,
+      pagination: paginatedResponse(parsedBlogs, total, page, limit).pagination,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Internal Server Error" });
@@ -470,30 +482,26 @@ const getBlogById = async (req, res) => {
     const { id } = req.params;
     const isAdmin = !!req.admin;
 
-    // Fetch blog post
     const blog = await db.select(
       "tbl_blogs",
       "id, title, excerpt, content, category, image, author, author_bio, status, read_time, tags, is_featured, likes, shares, comments, created_at, updated_at, published_at",
-      `id=${id}`
+      "id = ?",
+      [id]
     );
 
     if (!blog) {
       return res.status(404).json({ message: "Blog not found" });
     }
 
-    // Non-admins can only see published blogs
     if (!isAdmin && blog.status !== "published") {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    console.log("Blog from getBlogById:", { id: blog.id, status: blog.status });
-
-    // Parse tags and format date
     const parsedBlog = {
       ...blog,
-      tags: JSON.parse(blog.tags || "[]"),
+      tags: typeof blog.tags === "string" ? JSON.parse(blog.tags || "[]") : blog.tags || [],
       date: blog.published_at
-        ? blog.published_at.toISOString().split("T")[0]
+        ? new Date(blog.published_at).toISOString().split("T")[0]
         : null,
     };
 
@@ -511,15 +519,17 @@ const likeBlog = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if blog exists
-    const blog = await db.select("tbl_blogs", "id, likes", `id=${id}`);
-    if (!blog) {
+    const result = await db.queryAll(
+      "UPDATE tbl_blogs SET likes = likes + 1 WHERE id = ?",
+      [id]
+    );
+
+    if (!result || result.affectedRows === 0) {
       return res.status(404).json({ message: "Blog not found" });
     }
 
-    // Increment likes
-    await db.update("tbl_blogs", { likes: blog.likes + 1 }, `id=${id}`);
-    res.json({ message: "Blog liked successfully", likes: blog.likes + 1 });
+    const blog = await db.select("tbl_blogs", "id, likes", "id = ?", [id]);
+    res.json({ message: "Blog liked successfully", likes: blog.likes });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Internal Server Error" });
@@ -531,15 +541,17 @@ const shareBlog = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if blog exists
-    const blog = await db.select("tbl_blogs", "id, shares", `id=${id}`);
-    if (!blog) {
+    const result = await db.queryAll(
+      "UPDATE tbl_blogs SET shares = shares + 1 WHERE id = ?",
+      [id]
+    );
+
+    if (!result || result.affectedRows === 0) {
       return res.status(404).json({ message: "Blog not found" });
     }
 
-    // Increment shares
-    await db.update("tbl_blogs", { shares: blog.shares + 1 }, `id=${id}`);
-    res.json({ message: "Blog shared successfully", shares: blog.shares + 1 });
+    const blog = await db.select("tbl_blogs", "id, shares", "id = ?", [id]);
+    res.json({ message: "Blog shared successfully", shares: blog.shares });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Internal Server Error" });
@@ -551,7 +563,6 @@ const addComment = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate request body
     await body("name")
       .notEmpty()
       .withMessage("Name is required")
@@ -576,13 +587,11 @@ const addComment = async (req, res) => {
 
     const { name, email, comment } = req.body;
 
-    // Check if blog exists
-    const blog = await db.select("tbl_blogs", "id, comments", `id=${id}`);
+    const blog = await db.select("tbl_blogs", "id", "id = ?", [id]);
     if (!blog) {
       return res.status(404).json({ message: "Blog not found" });
     }
 
-    // Insert comment
     const newComment = await db.insert("tbl_comments", {
       blog_id: id,
       name,
@@ -590,8 +599,10 @@ const addComment = async (req, res) => {
       comment,
     });
 
-    // Increment comments count
-    await db.update("tbl_blogs", { comments: blog.comments + 1 }, `id=${id}`);
+    await db.queryAll(
+      "UPDATE tbl_blogs SET comments = comments + 1 WHERE id = ?",
+      [id]
+    );
 
     res
       .status(201)
@@ -607,17 +618,17 @@ const getComments = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if blog exists
-    const blog = await db.select("tbl_blogs", "id", `id=${id}`);
+    const blog = await db.select("tbl_blogs", "id", "id = ?", [id]);
     if (!blog) {
       return res.status(404).json({ message: "Blog not found" });
     }
 
-    // Fetch comments
     const comments = await db.selectAll(
       "tbl_comments",
       "id, name, email, comment, created_at",
-      `blog_id=${id}`
+      "blog_id = ?",
+      [id],
+      "ORDER BY created_at DESC"
     );
 
     res.json({ comments });

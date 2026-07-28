@@ -5,18 +5,16 @@ const adminMiddleware = require('../middleware/adminMiddleware');
 const SpotFuturesArbitrageService = require('../services/SpotFuturesArbitrageService');
 const CacheService = require('../services/CacheService');
 const { calculateProfit } = require('../controllers/spotFuturesController');
+const { startBackgroundScans } = require('../services/cacheBootstrap');
 
 const sfService = new SpotFuturesArbitrageService();
+const CACHE_KEY_SF = CacheService.CACHE_KEYS.SPOT_FUTURES;
 
-// ─── Cache Setup ──────────────────────────────────────────────────────
-const CACHE_KEY_SF = 'spot_futures_data';
+startBackgroundScans();
 
 const fetchSpotFuturesData = async () => {
     return await sfService.scanOpportunities();
 };
-
-// Auto-refreshing cache every 5 minutes
-CacheService.refreshCachePeriodically(fetchSpotFuturesData, CACHE_KEY_SF);
 
 // ─── User Endpoints ──────────────────────────────────────────────────
 

@@ -26,7 +26,8 @@ const subscribeNewsletter = async (req, res) => {
     const existingSubscriber = await db.select(
       "tbl_newsletter_subscribers",
       "*",
-      `email='${email}'`
+      "email = ?",
+      [email]
     );
 
     if (existingSubscriber) {
@@ -43,7 +44,8 @@ const subscribeNewsletter = async (req, res) => {
           unsubscribe_token: unsubscribeToken,
           subscribed_at: new Date(),
         },
-        `id=${existingSubscriber.id}`
+        "id = ?",
+        [existingSubscriber.id]
       );
 
       const confirmationLink = `https://arbilo.com/newsletter/confirm?token=${subscriptionToken}`;
@@ -236,7 +238,8 @@ const confirmSubscription = async (req, res) => {
     const subscriber = await db.select(
       "tbl_newsletter_subscribers",
       "*",
-      `subscription_token='${token}'`
+      "subscription_token = ?",
+      [token]
     );
     if (!subscriber) {
       return res.status(400).json({ message: "Invalid or expired token" });
@@ -244,7 +247,8 @@ const confirmSubscription = async (req, res) => {
     await db.update(
       "tbl_newsletter_subscribers",
       { is_active: true, confirmed_at: new Date() },
-      `id=${subscriber.id}`
+      "id = ?",
+      [subscriber.id]
     );
     res.json({ message: "Subscription confirmed successfully" });
   } catch (err) {
@@ -260,12 +264,13 @@ const unsubscribeNewsletter = async (req, res) => {
     const subscriber = await db.select(
       "tbl_newsletter_subscribers",
       "*",
-      `unsubscribe_token='${token}'`
+      "unsubscribe_token = ?",
+      [token]
     );
     if (!subscriber) {
       return res.status(400).json({ message: "Invalid or expired token" });
     }
-    await db.delete("tbl_newsletter_subscribers", `id=${subscriber.id}`);
+    await db.delete("tbl_newsletter_subscribers", "id = ?", [subscriber.id]);
     await transporter.sendMail({
       from: '"Arbilo" <hello@arbilo.com>',
       to: subscriber.email,
@@ -333,12 +338,29 @@ const unsubscribeNewsletter = async (req, res) => {
 // Admin: Get All Subscribers
 const getAllSubscribers = async (req, res) => {
   try {
-    const subscribers = await db.selectAll(
-      "tbl_newsletter_subscribers",
-      "*",
-      true
+    const { parsePagination, paginatedResponse } = require("../utils/pagination");
+    const { page, limit, offset } = parsePagination(req.query, {
+      defaultLimit: 50,
+      maxLimit: 200,
+    });
+
+    const countRow = await db.queryOne(
+      "SELECT COUNT(*) as count FROM tbl_newsletter_subscribers"
     );
-    res.json({ subscribers });
+    const total = countRow?.count || 0;
+
+    const subscribers = await db.queryAll(
+      `SELECT id, email, is_active, subscribed_at, confirmed_at
+       FROM tbl_newsletter_subscribers
+       ORDER BY id DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    res.json({
+      subscribers,
+      pagination: paginatedResponse(subscribers, total, page, limit).pagination,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Internal Server Error" });
@@ -358,9 +380,10 @@ const toggleSubscriberActiveStatus = async (req, res) => {
     const result = await db.update(
       "tbl_newsletter_subscribers",
       { is_active },
-      `id=${subscriberId}`
+      "id = ?",
+      [subscriberId]
     );
-    if (result.rowCount === 0) {
+    if (result.affected_rows === 0) {
       return res.status(404).json({ message: "Subscriber not found" });
     }
     res.json({ message: "Subscriber active status updated successfully" });
@@ -475,17 +498,30 @@ const sendNewsletter = async (req, res) => {
     const subscribers = await db.selectAll(
       "tbl_newsletter_subscribers",
       "email, unsubscribe_token",
-      "is_active = true"
+      "is_active = 1 OR is_active = true"
     );
 
     if (!subscribers || subscribers.length === 0) {
       return res.status(400).json({ message: "No active subscribers found" });
     }
 
-    const sendPromises = subscribers.map(async (subscriber) => {
-      const unsubscribeLink = `https://arbilo.com/newsletter/unsubscribe?token=${subscriber.unsubscribe_token}`;
-      const viewInBrowserLink = `https://arbilo.com/newsletter/view?id=${Date.now()}`;
-      const emailContent = `
+    // Respond immediately; send emails in background batches to avoid SMTP rate limits
+    res.json({
+      message: `Newsletter queued for ${subscribers.length} subscribers`,
+      queued: subscribers.length,
+    });
+
+    const BATCH_SIZE = 10;
+    const DELAY_MS = 1000;
+
+    (async () => {
+      for (let i = 0; i < subscribers.length; i += BATCH_SIZE) {
+        const batch = subscribers.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (subscriber) => {
+            const unsubscribeLink = `https://arbilo.com/newsletter/unsubscribe?token=${subscriber.unsubscribe_token}`;
+            const viewInBrowserLink = `https://arbilo.com/newsletter/view?id=${Date.now()}`;
+            const emailContent = `
         <!DOCTYPE html>
         <html lang="en">
         <head>
@@ -519,7 +555,7 @@ const sendNewsletter = async (req, res) => {
                       <p style="margin: 0 0 20px;">Dear Subscriber,</p>
                       ${content}
                       <p style="margin: 20px 0 0; font-size: 14px; color: #555;">
-                        Want to stop receiving these emails? 
+                        Want to stop receiving these emails?
                         <a href="${unsubscribeLink}" style="color: #222222; text-decoration: underline;">Unsubscribe</a>
                       </p>
                     </td>
@@ -527,21 +563,7 @@ const sendNewsletter = async (req, res) => {
                   <tr>
                     <td align="center" bgcolor="#eeeeee" style="padding: 15px; font-size: 14px; color: #555;">
                       <p style="margin: 0 0 10px;"><strong>Stay Connected</strong></p>
-                      <table cellpadding="0" cellspacing="0" role="presentation">
-                        <tr>
-                          <td style="padding: 0 5px;">
-                            <a href="https://facebook.com/yourpage"><img src="https://cdn-icons-png.flaticon.com/512/733/733547.png" width="30" alt="Facebook" style="display: block;"></a>
-                          </td>
-                          <td style="padding: 0 5px;">
-                            <a href="https://twitter.com/yourpage"><img src="https://cdn-icons-png.flaticon.com/512/733/733579.png" width="30" alt="Twitter" style="display: block;"></a>
-                          </td>
-                          <td style="padding: 0 5px;">
-                            <a href="https://instagram.com/yourpage"><img src="https://cdn-icons-png.flaticon.com/512/733/733558.png" width="30" alt="Instagram" style="display: block;"></a>
-                          </td>
-                        </tr>
-                      </table>
                       <p style="margin: 10px 0 0;">© 2025 Arbilo. All rights reserved.</p>
-                      <p style="margin: 5px 0 0;">Arbilo, Your City, Your Country</p>
                     </td>
                   </tr>
                 </table>
@@ -552,24 +574,26 @@ const sendNewsletter = async (req, res) => {
         </html>
       `;
 
-      console.log(
-        `Sending email to ${subscriber.email} with content:`,
-        emailContent
-      );
+            try {
+              await transporter.sendMail({
+                from: '"Arbilo" <hello@arbilo.com>',
+                to: subscriber.email,
+                subject,
+                html: emailContent,
+              });
+            } catch (sendErr) {
+              console.error(`Failed to send newsletter to ${subscriber.email}:`, sendErr.message);
+            }
+          })
+        );
+        if (i + BATCH_SIZE < subscribers.length) {
+          await new Promise((r) => setTimeout(r, DELAY_MS));
+        }
+      }
+      console.log(`Newsletter send complete for ${subscribers.length} subscribers`);
+    })().catch((err) => console.error("Newsletter background send failed:", err));
 
-      return transporter.sendMail({
-        from: '"Arbilo" <hello@arbilo.com>',
-        to: subscriber.email,
-        subject,
-        html: emailContent,
-      });
-    });
-
-    await Promise.all(sendPromises);
-
-    res.json({
-      message: `Newsletter sent to ${subscribers.length} subscribers`,
-    });
+    return;
   } catch (err) {
     console.error("Newsletter send error:", err);
     res

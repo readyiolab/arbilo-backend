@@ -1,40 +1,65 @@
 const jwt = require("jsonwebtoken");
-const { jwtSignupSecret, jwtLoginSecret } = require("../config/dotenvConfig");
+const db = require("../config/db_settings");
+const {
+  jwtSecret,
+  jwtSignupSecret,
+  jwtLoginSecret,
+} = require("../config/dotenvConfig");
 
-const authMiddleware = (req, res, next) => {
+function verifyWithSecrets(token) {
+  const secrets = [jwtSecret, jwtLoginSecret, jwtSignupSecret].filter(Boolean);
+  let lastError;
+  for (const secret of secrets) {
+    try {
+      return jwt.verify(token, secret);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("Invalid token");
+}
+
+const authMiddleware = async (req, res, next) => {
   const authHeader = req.header("Authorization");
-  console.log("Authorization Header:", authHeader);
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    console.error("Missing or invalid Authorization header");
     return res.status(401).json({ error: "Authorization token is required" });
   }
 
   const token = authHeader.split(" ")[1];
-  console.log("Extracted Token:", token);
 
   try {
-    let decodedToken;
-    let source;
+    const decodedToken = verifyWithSecrets(token);
+    const userId = decodedToken.id || decodedToken.userId;
 
-    try {
-      decodedToken = jwt.verify(token, jwtSignupSecret);
-      source = "signup";
-    } catch (signupErr) {
-      console.warn("Signup token verification failed, trying login secret...");
-      decodedToken = jwt.verify(token, jwtLoginSecret);
-      source = "login";
+    if (!userId) {
+      return res.status(401).json({ error: "Invalid token structure" });
     }
 
-    console.log("Decoded Token:", decodedToken);
-    console.log("Token Source:", source);
+    const user = await db.select(
+      "tbl_users",
+      "id, email, session_token, is_active",
+      "id = ?",
+      [userId]
+    );
 
-    req.userId = decodedToken.id || decodedToken.userId;
-    req.tokenSource = source;
+    if (!user) {
+      return res.status(401).json({ error: "User not found" });
+    }
 
+    if (user.is_active === 0) {
+      return res.status(403).json({ error: "Account is inactive" });
+    }
+
+    // Invalidate sessions after logout (session_token cleared)
+    if (!user.session_token || user.session_token !== token) {
+      return res.status(401).json({ error: "Session expired. Please log in again." });
+    }
+
+    req.userId = user.id;
+    req.user = user;
     next();
   } catch (err) {
-    console.error("Token verification failed:", err.message);
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 };

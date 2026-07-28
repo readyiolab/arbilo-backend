@@ -6,12 +6,17 @@ class CacheService {
         ARBI_PAIR: 'arbipair_data',
         TRIANGULAR_ARBI: 'triangular_arbi',
         SPOT_FUTURES: 'spot_futures_data',
-        CACHE_METADATA: 'cache_metadata'  // Stores last update timestamp
+        CACHE_METADATA: 'cache_metadata'
     };
     
-    static CACHE_TTL = 300; // 5 minutes in seconds
+    static CACHE_TTL = 300; // 5 minutes
+    static _refreshing = new Set();
+    static _masterStarted = false;
 
-    // Get current cache metadata (timestamp info)
+    static arbipairKey(investment = 100000) {
+        return `${this.CACHE_KEYS.ARBI_PAIR}:${investment}`;
+    }
+
     static async getCacheMetadata() {
         try {
             const metadata = await redisClient.get(this.CACHE_KEYS.CACHE_METADATA);
@@ -25,7 +30,6 @@ class CacheService {
         }
     }
 
-    // Update cache metadata with new timestamp
     static async updateCacheMetadata() {
         const now = new Date();
         const metadata = {
@@ -55,46 +59,59 @@ class CacheService {
                 return JSON.parse(cachedData);
             }
 
-            const freshData = await fetchFunction();
-            
-            await redisClient.setEx(
-                key,
-                this.CACHE_TTL,
-                JSON.stringify(freshData)
-            );
+            // Stampede lock: only one refresh per key at a time
+            const lockKey = `lock:${key}`;
+            if (this._refreshing.has(key)) {
+                // Wait briefly for in-flight refresh
+                await new Promise((r) => setTimeout(r, 500));
+                const retry = await redisClient.get(key);
+                if (retry) return JSON.parse(retry);
+            }
 
-            await this.updateCacheMetadata();
+            this._refreshing.add(key);
+            try {
+                if (typeof redisClient.setNX === 'function') {
+                    await redisClient.setNX(lockKey, 30, '1');
+                }
 
-            return freshData;
+                const freshData = await fetchFunction();
+                await redisClient.setEx(key, this.CACHE_TTL, JSON.stringify(freshData));
+                await this.updateCacheMetadata();
+                return freshData;
+            } finally {
+                this._refreshing.delete(key);
+                try {
+                    await redisClient.del(lockKey);
+                } catch (_) {}
+            }
         } catch (error) {
             console.error(`Cache operation failed for key ${key}:`, error);
             return await fetchFunction();
         }
     }
 
-    /**
-     * Master Refresh Logic (Perfect Sync)
-     * Refreshes all specified keys in one cycle and updates metadata once.
-     * This ensures all users see the exact same timing for all signals.
-     */
     static async startMasterRefresh(refreshConfigs) {
+        if (this._masterStarted) {
+            console.log('Master refresh already started, skipping duplicate');
+            return;
+        }
+        this._masterStarted = true;
+
         const runRefresh = async () => {
-            console.log('🔄 Starting Master Refresh Cycle...');
+            console.log('Starting Master Refresh Cycle...');
             try {
-                // Fetch all data in parallel
                 const results = await Promise.all(
                     refreshConfigs.map(async (config) => {
                         try {
                             const data = await config.fetchFunction();
                             return { key: config.key, data };
                         } catch (err) {
-                            console.error(`❌ Failed to fetch data for ${config.key}:`, err.message);
+                            console.error(`Failed to fetch data for ${config.key}:`, err.message);
                             return null;
                         }
                     })
                 );
 
-                // Store all successful results in Redis
                 for (const result of results) {
                     if (result && result.data) {
                         await redisClient.setEx(
@@ -105,23 +122,19 @@ class CacheService {
                     }
                 }
 
-                // Update metadata ONCE for the entire batch
                 const metadata = await this.updateCacheMetadata();
-                console.log(`✅ Master Refresh Complete. Next update at: ${metadata.nextUpdateAt}`);
+                console.log(`Master Refresh Complete. Next update at: ${metadata.nextUpdateAt}`);
             } catch (error) {
-                console.error('❌ Master Refresh Cycle failed:', error);
+                console.error('Master Refresh Cycle failed:', error);
             }
         };
 
-        // Initial run
         await runRefresh();
-
-        // Set up periodic refresh
         setInterval(runRefresh, this.CACHE_TTL * 1000);
     }
 
-    // 🔄 Auto-refresh cache every 5 minutes (Fallback for single keys)
     static async refreshCachePeriodically(fetchFunction, key) {
+        // Prefer master refresh; keep as fallback for keys not in master
         const run = async () => {
             try {
                 const freshData = await fetchFunction();

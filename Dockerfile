@@ -1,18 +1,17 @@
 # Use Node base image
-FROM node:18
+FROM node:18-alpine
 
-# Create app directory
 WORKDIR /app
 
-# Install app dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm install --omit=dev
 
-# Copy the rest of your application
 COPY . .
 
-# Expose backend port
+ENV NODE_ENV=production
 EXPOSE 5000
 
-# Run the backend
-CMD ["npm", "start"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:5000/api/health || exit 1
+
+CMD ["node", "index.js"]

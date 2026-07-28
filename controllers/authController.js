@@ -348,7 +348,7 @@ const getUserProfile = async (req, res) => {
 
     const userData = await db.select(
       "tbl_users",
-      "*",
+      "id, name, email, is_active, is_verified, is_free_user, subscription_type, subscription_status, subscription_start_date, subscription_end_date, trial_end_date, created_at, updated_at, google_id",
       "id = ?",
       [userId]
     );
@@ -358,7 +358,13 @@ const getUserProfile = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    return res.status(200).json({ userData });
+    const { google_id, ...safeUser } = userData;
+    return res.status(200).json({
+      userData: {
+        ...safeUser,
+        has_google_login: !!google_id,
+      },
+    });
   } catch (error) {
     console.error("Error fetching user data:", error.stack);
     return res.status(500).json({ error: "Internal server error" });
@@ -371,12 +377,11 @@ const forgotPassword = async (req, res) => {
     const { email } = req.body;
 
     const user = await db.select("tbl_users", "*", "email = ?", [email]);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    if (user.google_id) {
-      return res.status(400).json({ message: "This account uses Google login. Please use Google to sign in." });
+    // Always return the same message to avoid user enumeration
+    if (!user || user.google_id) {
+      return res.status(200).json({
+        message: "If an account exists for that email, a reset link has been sent.",
+      });
     }
 
     const resetToken = jwt.sign(
@@ -426,7 +431,9 @@ const forgotPassword = async (req, res) => {
       `,
     });
 
-    res.json({ message: "Password reset email sent" });
+    res.json({
+      message: "If an account exists for that email, a reset link has been sent.",
+    });
   } catch (err) {
     console.error("Error sending password reset email:", err.stack);
     res.status(500).json({ message: "Internal Server Error" });
@@ -611,10 +618,10 @@ const logout = async (req, res) => {
 
     // Get the last login activity for this user today
     const today = new Date().toISOString().split('T')[0];
-    const lastActivity = await db.select(
-      "tbl_login_activity",
-      "*",
-      "user_id = ? AND login_date = ? ORDER BY id DESC LIMIT 1",
+    const lastActivity = await db.queryOne(
+      `SELECT * FROM tbl_login_activity
+       WHERE user_id = ? AND login_date = ?
+       ORDER BY id DESC LIMIT 1`,
       [userId, today]
     );
 

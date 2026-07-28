@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
+const helmet = require("helmet");
+const compression = require("compression");
 const authRoutes = require("./routes/authRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const arbitrageRoutes = require("./routes/arbitrageRoutes");
@@ -9,12 +11,12 @@ const blogRoutes = require("./routes/blogRoutes");
 const newsletterRoutes = require("./routes/newsletterRoutes");
 const commonRoutes = require("./routes/commonRoutes");
 const db = require("./config/db_settings");
+const { checkTrialExpirations } = require("./controllers/adminController");
 
-// Database Table Initialization
 const initDb = async () => {
   try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS support_tickets (
+    await db.queryAll(`
+      CREATE TABLE IF NOT EXISTS tbl_support_tickets (
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(255),
         email VARCHAR(255),
@@ -24,8 +26,8 @@ const initDb = async () => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS feedback (
+    await db.queryAll(`
+      CREATE TABLE IF NOT EXISTS tbl_feedback (
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(255),
         email VARCHAR(255),
@@ -36,7 +38,7 @@ const initDb = async () => {
     `);
     console.log("Support and Feedback tables checked/created");
   } catch (error) {
-    console.error("Error initializing DB tables:", error);
+    console.error("Error initializing DB tables:", error.message);
   }
 };
 
@@ -44,7 +46,7 @@ initDb();
 
 const app = express();
 const server = http.createServer(app);
-const port = 5000;
+const port = process.env.PORT || 5000;
 
 const allowedOrigins = [
   "https://arbilo.com",
@@ -54,12 +56,19 @@ const allowedOrigins = [
   "http://localhost:3000",
 ];
 
-// CORS configuration
+app.use(
+  helmet({
+    crossOriginOpenerPolicy: { policy: "unsafe-none" },
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: false,
+  })
+);
+app.use(compression());
+
 app.use(
   cors({
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
-
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -74,33 +83,19 @@ app.use(
   })
 );
 
-// Security headers - UPDATED for Google OAuth
-app.use((req, res, next) => {
-  // Remove or modify these headers that are causing COOP issues
-  res.removeHeader("Cross-Origin-Opener-Policy");
-  res.removeHeader("Cross-Origin-Embedder-Policy");
-
-  // Set more permissive headers for Google OAuth
-  res.setHeader("Cross-Origin-Opener-Policy", "unsafe-none");
-  res.setHeader("Cross-Origin-Embedder-Policy", "unsafe-none");
-
-  next();
-});
-
 app.options("*", cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
-// Add request logging middleware
-app.use((req, res, next) => {
-  if (req.path.includes("/api/auth/google")) {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-    console.log("Request body:", req.body);
-    console.log("Request headers:", req.headers);
+app.get("/api/health", async (req, res) => {
+  try {
+    await db.queryOne("SELECT 1 as ok");
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(503).json({ status: "degraded", error: "database unavailable" });
   }
-  next();
 });
 
-// Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/arbitrage", arbitrageRoutes);
@@ -109,16 +104,35 @@ app.use("/api/blogs", blogRoutes);
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api", commonRoutes);
 
-// Error handling middleware
 app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
-  res
-    .status(500)
-    .json({ message: "Internal server error", error: err.message });
+  console.error("Unhandled error:", err.message);
+  const status = err.message === "CORS not allowed" ? 403 : 500;
+  res.status(status).json({
+    message: status === 403 ? "CORS not allowed" : "Internal server error",
+  });
 });
 
-// Initialize cron jobs
-console.log("Cron jobs initialized");
+// Daily trial expiration check (runs every 24h after start)
+checkTrialExpirations().catch(() => {});
+setInterval(() => {
+  checkTrialExpirations().catch((err) =>
+    console.error("Trial expiration check failed:", err.message)
+  );
+}, 24 * 60 * 60 * 1000);
+
+const shutdown = async (signal) => {
+  console.log(`${signal} received, shutting down...`);
+  server.close(async () => {
+    try {
+      await db.end();
+    } catch (_) {}
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 10000);
+};
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 server.listen(port, () => {
   console.log(`Server is running on port ${port}`);

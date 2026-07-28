@@ -3,56 +3,53 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
 const { jwtSecret } = require("../config/dotenvConfig");
-const generator = require("generate-password");
 const { format, addDays, addMonths } = require("date-fns");
 const { sendCredentialsEmail } = require("../services/emailService");
-// Secret for JWT
+const {
+  stripSensitive,
+  stripSensitiveList,
+  USER_SAFE_COLUMNS,
+  ADMIN_SAFE_COLUMNS,
+} = require("../utils/sanitize");
+const { parsePagination, paginatedResponse } = require("../utils/pagination");
+
 const JWT_SECRET = jwtSecret;
 
-// Admin Signup
 const adminSignup = async (req, res) => {
   try {
-    // Validate email and password using express-validator
     await body("email")
       .isEmail()
       .withMessage("Please enter a valid email address")
       .run(req);
     await body("password")
-      .isLength({ min: 6 })
-      .withMessage("Password must be at least 6 characters long")
+      .isLength({ min: 8 })
+      .withMessage("Password must be at least 8 characters long")
       .run(req);
 
     const errors = validationResult(req);
-
-    // If there are validation errors, send a detailed response
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
     const { name, email, password, confirmPassword } = req.body;
 
-    // Check if the passwords match
     if (password !== confirmPassword) {
       return res.status(400).json({ message: "Passwords do not match" });
     }
 
-    // Check if admin already exists
     const existingAdmin = await db.select(
       "tbl_admins",
-      "*",
-      `email='${email}'`
+      "id",
+      "email = ?",
+      [email]
     );
     if (existingAdmin) {
       return res.status(400).json({ message: "Email already exists" });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Insert new admin into the database
     await db.insert("tbl_admins", { name, email, password: hashedPassword });
 
-    // Send success response
     res.status(201).json({ message: "Admin registered successfully" });
   } catch (err) {
     console.error(err);
@@ -60,44 +57,37 @@ const adminSignup = async (req, res) => {
   }
 };
 
-// Admin Login
 const adminLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Check if admin exists
-    const admin = await db.select("tbl_admins", "*", `email='${email}'`);
+    const admin = await db.select("tbl_admins", "*", "email = ?", [email]);
     if (!admin) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
 
-    // Check password
     const isPasswordValid = await bcrypt.compare(password, admin.password);
     if (!isPasswordValid) {
-      return res.status(400).json({ message: "Password Incorrect" });
+      return res.status(400).json({ message: "Invalid email or password" });
     }
 
-    // Generate a new session token
     const sessionToken = jwt.sign(
       { id: admin.id, email: admin.email },
       JWT_SECRET,
-      {
-        expiresIn: "1h",
-      }
+      { expiresIn: "8h" }
     );
 
-    // Update the admin's session token in the database
     await db.update(
       "tbl_admins",
       { session_token: sessionToken },
-      `id=${admin.id}`
+      "id = ?",
+      [admin.id]
     );
 
-    // Return the session token and admin data in the response
     res.json({
       message: "Login successful",
       token: sessionToken,
-      admin, // Include the admin data in the response
+      admin: stripSensitive(admin),
     });
   } catch (err) {
     console.error(err);
@@ -105,24 +95,21 @@ const adminLogin = async (req, res) => {
   }
 };
 
-// Get Admin Profile
 const getAdminProfile = async (req, res) => {
   try {
-    // Get admin ID from the authenticated request
-    const adminId = req.admin.id; // This comes from the auth middleware
+    const adminId = req.admin.id;
 
-    // Fetch admin details from database
     const admin = await db.select(
       "tbl_admins",
-      "id, name, email, created_at", // Only select non-sensitive fields
-      `id=${adminId}`
+      ADMIN_SAFE_COLUMNS,
+      "id = ?",
+      [adminId]
     );
 
     if (!admin) {
       return res.status(404).json({ message: "Admin not found" });
     }
 
-    // Return admin data
     res.json({ admin });
   } catch (err) {
     console.error(err);
@@ -130,33 +117,28 @@ const getAdminProfile = async (req, res) => {
   }
 };
 
-// Update Admin Profile
 const updateAdminProfile = async (req, res) => {
   try {
-    const adminId = req.admin.id; // From auth middleware
+    const adminId = req.admin.id;
     const { name, email, currentPassword, newPassword } = req.body;
 
-    // Fetch current admin data
-    const admin = await db.select("tbl_admins", "*", `id=${adminId}`);
+    const admin = await db.select("tbl_admins", "*", "id = ?", [adminId]);
     if (!admin) {
       return res.status(404).json({ message: "Admin not found" });
     }
 
-    // Prepare update data
     const updateData = {};
 
-    // Update name if provided
     if (name) {
       updateData.name = name;
     }
 
-    // Update email if provided
     if (email && email !== admin.email) {
-      // Check if new email already exists
       const emailExists = await db.select(
         "tbl_admins",
         "id",
-        `email='${email}' AND id!=${adminId}`
+        "email = ? AND id != ?",
+        [email, adminId]
       );
       if (emailExists) {
         return res.status(400).json({ message: "Email already in use" });
@@ -164,9 +146,7 @@ const updateAdminProfile = async (req, res) => {
       updateData.email = email;
     }
 
-    // Update password if provided
     if (currentPassword && newPassword) {
-      // Verify current password
       const isPasswordValid = await bcrypt.compare(
         currentPassword,
         admin.password
@@ -176,14 +156,11 @@ const updateAdminProfile = async (req, res) => {
           .status(400)
           .json({ message: "Current password is incorrect" });
       }
-
-      // Hash new password
       updateData.password = await bcrypt.hash(newPassword, 10);
     }
 
-    // Update admin profile
     if (Object.keys(updateData).length > 0) {
-      await db.update("tbl_admins", updateData, `id=${adminId}`);
+      await db.update("tbl_admins", updateData, "id = ?", [adminId]);
       res.json({ message: "Profile updated successfully" });
     } else {
       res.status(400).json({ message: "No data provided for update" });
@@ -194,15 +171,29 @@ const updateAdminProfile = async (req, res) => {
   }
 };
 
-// Get All Users
 const getAllUsers = async (req, res) => {
   try {
-    // Fetch all users from the database
-    const users = await db.selectAll("tbl_users", "*", true);
-    console.log(users);
+    const { page, limit, offset } = parsePagination(req.query, {
+      defaultLimit: 50,
+      maxLimit: 200,
+    });
 
-    // Send the users data in the response
-    res.json({ users });
+    const countRow = await db.queryOne(
+      "SELECT COUNT(*) as count FROM tbl_users"
+    );
+    const total = countRow?.count || 0;
+
+    const users = await db.queryAll(
+      `SELECT ${USER_SAFE_COLUMNS} FROM tbl_users ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    res.json({
+      users: stripSensitiveList(users),
+      ...paginatedResponse(users, total, page, limit).pagination && {
+        pagination: paginatedResponse(users, total, page, limit).pagination,
+      },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Internal Server Error" });
@@ -214,33 +205,31 @@ const toggleUserActiveStatus = async (req, res) => {
     const { userId } = req.params;
     const { is_active } = req.body;
 
-    // Validate that is_active is either 1 or 0
     if (is_active !== 0 && is_active !== 1) {
       return res
         .status(400)
         .json({ message: "Invalid value for is_active. It must be 0 or 1." });
     }
 
-    // If user is being deactivated, reset subscription-related fields
     const updatedFields =
       is_active === 0
         ? {
-          is_active,
-          subscription_type: null,
-          subscription_status: null,
-          subscription_start_date: null,
-          subscription_end_date: null,
-        }
-        : { is_active }; // If user is being activated, no need to change subscription fields
+            is_active,
+            subscription_type: null,
+            subscription_status: null,
+            subscription_start_date: null,
+            subscription_end_date: null,
+          }
+        : { is_active };
 
-    // Update the user's active status and subscription fields in the database
     const result = await db.update(
       "tbl_users",
       updatedFields,
-      `id = ${userId}`
+      "id = ?",
+      [userId]
     );
 
-    if (result.rowCount === 0) {
+    if (result.affected_rows === 0) {
       return res.status(404).json({ message: "User not found" });
     }
 
@@ -250,57 +239,49 @@ const toggleUserActiveStatus = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
 const createUserAndSendCredentials = async (req, res) => {
   try {
     const { email, name, subscription_type, start_date } = req.body;
 
-    // Validate required fields
     if (!email || !name || !subscription_type || !start_date) {
       return res.status(400).json({
         message: "Email, Name, Subscription Type, and Start Date are required",
       });
     }
 
-    // Validate subscription type
     const validTypes = ["monthly", "6-months"];
     if (!validTypes.includes(subscription_type)) {
       return res.status(400).json({ message: "Invalid subscription type" });
     }
 
-    // Check if user already exists
-    const existingUser = await db.selectAll("tbl_users", "*", `email='${email}'`);
-    if (existingUser && existingUser.length > 0) {
+    const existingUser = await db.select("tbl_users", "id", "email = ?", [
+      email,
+    ]);
+    if (existingUser) {
       return res.status(400).json({ message: "Email already exists" });
     }
 
-    // Generate a random password of 8 characters
-    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+";
+    const charset =
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+";
     let password = "";
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 12; i++) {
       const randomIndex = Math.floor(Math.random() * charset.length);
       password += charset[randomIndex];
     }
 
-    // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Calculate dates
     const startDate = new Date(start_date);
     startDate.setHours(0, 0, 0, 0);
 
-    // Trial period: 7 days from start date
     const trialEndDate = addDays(startDate, 7);
-
-    // Subscription starts after trial
     const subscriptionStartDate = addDays(trialEndDate, 1);
-
-    // Calculate subscription end date
     const subscriptionEndDate =
       subscription_type === "monthly"
         ? addMonths(subscriptionStartDate, 1)
         : addMonths(subscriptionStartDate, 6);
 
-    // Insert new user into the database
     await db.insert("tbl_users", {
       email,
       name,
@@ -315,11 +296,7 @@ const createUserAndSendCredentials = async (req, res) => {
       updated_at: new Date(),
     });
 
-    // Send credentials email
     await sendCredentialsEmail(name, email, password);
-
-    // Add logging to verify password length (remove in production)
-    console.log(`Generated password length: ${password.length}`);
 
     res.status(201).json({
       message: "User created and credentials sent successfully",
@@ -333,74 +310,51 @@ const createUserAndSendCredentials = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in createUserAndSendCredentials:", err);
-    if (err.code === 'ER_DUP_ENTRY') {
+    if (err.code === "ER_DUP_ENTRY") {
       return res.status(400).json({ message: "Email already exists" });
     }
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
-// Cron job to update subscription statuses
+
 const checkTrialExpirations = async () => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = format(new Date(), "yyyy-MM-dd");
 
-    // Find users whose trial has ended and haven't paid
-    const expiredTrials = await db.select(
-      "tbl_users",
-      "*",
-      `trial_end_date <= '${format(
-        today,
-        "yyyy-MM-dd"
-      )}' AND subscription_status = 'trial'`
+    await db.queryAll(
+      `UPDATE tbl_users
+       SET is_active = 0, subscription_status = 'expired', updated_at = NOW()
+       WHERE trial_end_date <= ? AND subscription_status = 'trial'`,
+      [today]
     );
-
-    for (const user of expiredTrials) {
-      // Update user to inactive since trial ended without payment
-      await db.update(
-        "tbl_users",
-        {
-          is_active: 0,
-          subscription_status: "expired",
-          updated_at: new Date(),
-        },
-        `id = ${user.id}`
-      );
-    }
   } catch (err) {
     console.error("Error in checkTrialExpirations:", err);
   }
 };
 
-// Update User Subscription
 const updateUser = async (req, res) => {
   try {
     const { email, subscription_type, start_date } = req.body;
 
-    // Validate required fields
     if (!email || !subscription_type) {
       return res
         .status(400)
         .json({ message: "Email and subscription type are required" });
     }
 
-    // Validate subscription type
     const validTypes = ["monthly", "6-months"];
     if (!validTypes.includes(subscription_type)) {
       return res.status(400).json({ message: "Invalid subscription type" });
     }
 
-    // Check if user exists
-    const user = await db.select("tbl_users", "*", `email='${email}'`);
-    if (!user || user.length === 0) {
+    const user = await db.select("tbl_users", "*", "email = ?", [email]);
+    if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Use provided start_date or default to today
     const startDate = start_date ? new Date(start_date) : new Date();
     startDate.setHours(0, 0, 0, 0);
 
-    // Calculate trial and subscription dates
     const trialEndDate = addDays(startDate, 7);
     const subscriptionStartDate = addDays(trialEndDate, 1);
     const subscriptionEndDate =
@@ -408,10 +362,8 @@ const updateUser = async (req, res) => {
         ? addMonths(subscriptionStartDate, 1)
         : addMonths(subscriptionStartDate, 6);
 
-    // If user is being activated (e.g., after payment), set status to 'active'
     const subscriptionStatus = user.is_active === 0 ? "active" : "trial";
 
-    // Update user subscription info
     await db.update(
       "tbl_users",
       {
@@ -423,7 +375,8 @@ const updateUser = async (req, res) => {
         is_active: 1,
         updated_at: new Date(),
       },
-      `email = '${email}'`
+      "email = ?",
+      [email]
     );
 
     return res.status(200).json({
@@ -443,11 +396,12 @@ const updateUser = async (req, res) => {
   }
 };
 
-// Get free user count
 const getFreeUserCount = async (req, res) => {
   try {
-    const result = await db.selectAll("tbl_users", "COUNT(*) as count", "is_free_user = 1");
-    const freeUserCount = result.length > 0 ? result[0].count : 0;
+    const result = await db.queryOne(
+      "SELECT COUNT(*) as count FROM tbl_users WHERE is_free_user = 1"
+    );
+    const freeUserCount = result?.count || 0;
     const remainingSlots = Math.max(0, 2000 - freeUserCount);
 
     res.json({
@@ -455,7 +409,7 @@ const getFreeUserCount = async (req, res) => {
       free_user_count: freeUserCount,
       total_slots: 2000,
       remaining_slots: remainingSlots,
-      percentage_filled: ((freeUserCount / 2000) * 100).toFixed(2)
+      percentage_filled: ((freeUserCount / 2000) * 100).toFixed(2),
     });
   } catch (error) {
     console.error("Error fetching free user count:", error.stack);
@@ -463,41 +417,51 @@ const getFreeUserCount = async (req, res) => {
   }
 };
 
-// Get user login statistics
 const getUserLoginStats = async (req, res) => {
   try {
     const userId = req.params.userId;
+    const { page, limit, offset } = parsePagination(req.query, {
+      defaultLimit: 50,
+    });
 
     if (!userId) {
       return res.status(400).json({ message: "User ID is required" });
     }
 
-    const stats = await db.selectAll(
-      "tbl_login_activity",
-      "*",
-      "user_id = ?",
-      [userId],
-      "login_time DESC"
+    const countRow = await db.queryOne(
+      "SELECT COUNT(*) as count FROM tbl_login_activity WHERE user_id = ?",
+      [userId]
+    );
+    const total = countRow?.count || 0;
+
+    const stats = await db.queryAll(
+      `SELECT * FROM tbl_login_activity
+       WHERE user_id = ?
+       ORDER BY login_time DESC
+       LIMIT ? OFFSET ?`,
+      [userId, limit, offset]
     );
 
-    const statsWithDuration = stats.map(stat => {
+    const statsWithDuration = stats.map((stat) => {
       let duration = null;
       if (stat.login_time && stat.logout_time) {
         const loginTime = new Date(stat.login_time);
         const logoutTime = new Date(stat.logout_time);
-        duration = Math.round((logoutTime - loginTime) / 1000 / 60); // Duration in minutes
+        duration = Math.round((logoutTime - loginTime) / 1000 / 60);
       }
       return {
         ...stat,
-        session_duration_minutes: duration
+        session_duration_minutes: duration,
       };
     });
 
     res.json({
       message: "User login statistics retrieved",
       user_id: userId,
-      total_sessions: stats.length,
-      stats: statsWithDuration
+      total_sessions: total,
+      stats: statsWithDuration,
+      pagination: paginatedResponse(statsWithDuration, total, page, limit)
+        .pagination,
     });
   } catch (err) {
     console.error("Error fetching user login stats:", err.stack);
@@ -505,37 +469,33 @@ const getUserLoginStats = async (req, res) => {
   }
 };
 
-// Get overall statistics
 const getOverallStats = async (req, res) => {
   try {
-    // Get total users
-    const totalUsers = await db.selectAll("tbl_users", "COUNT(*) as count", "");
-    const total = totalUsers.length > 0 ? totalUsers[0].count : 0;
+    const totalRow = await db.queryOne(
+      "SELECT COUNT(*) as count FROM tbl_users"
+    );
+    const total = totalRow?.count || 0;
 
-    // Get free users
-    const freeUsers = await db.selectAll("tbl_users", "COUNT(*) as count", "is_free_user = 1");
-    const freeCount = freeUsers.length > 0 ? freeUsers[0].count : 0;
-
-    // Get paid users
+    const freeRow = await db.queryOne(
+      "SELECT COUNT(*) as count FROM tbl_users WHERE is_free_user = 1"
+    );
+    const freeCount = freeRow?.count || 0;
     const paidCount = total - freeCount;
 
-    // Get today's logins
-    const today = new Date().toISOString().split('T')[0];
-    const todayLogins = await db.selectAll(
-      "tbl_login_activity",
-      "COUNT(*) as count",
-      "login_date = ?",
+    const today = new Date().toISOString().split("T")[0];
+    const todayRow = await db.queryOne(
+      "SELECT COUNT(*) as count FROM tbl_login_activity WHERE login_date = ?",
       [today]
     );
-    const todayLoginCount = todayLogins.length > 0 ? todayLogins[0].count : 0;
+    const todayLoginCount = todayRow?.count || 0;
 
-    // Get average session duration
-    const avgSession = await db.selectAll(
-      "tbl_login_activity",
-      "AVG(TIMESTAMPDIFF(MINUTE, login_time, logout_time)) as avg_duration",
-      "logout_time IS NOT NULL"
+    const avgRow = await db.queryOne(
+      `SELECT AVG(TIMESTAMPDIFF(MINUTE, login_time, logout_time)) as avg_duration
+       FROM tbl_login_activity WHERE logout_time IS NOT NULL`
     );
-    const avgDuration = avgSession.length > 0 ? Math.round(avgSession[0].avg_duration) : 0;
+    const avgDuration = avgRow?.avg_duration
+      ? Math.round(avgRow.avg_duration)
+      : 0;
 
     res.json({
       message: "Overall statistics retrieved",
@@ -546,8 +506,8 @@ const getOverallStats = async (req, res) => {
         free_user_slots_remaining: Math.max(0, 2000 - freeCount),
         today_logins: todayLoginCount,
         average_session_duration_minutes: avgDuration,
-        free_user_percentage: ((freeCount / 2000) * 100).toFixed(2)
-      }
+        free_user_percentage: ((freeCount / 2000) * 100).toFixed(2),
+      },
     });
   } catch (error) {
     console.error("Error fetching overall stats:", error.stack);
@@ -555,22 +515,48 @@ const getOverallStats = async (req, res) => {
   }
 };
 
-// Get Support Tickets
 const getSupportTickets = async (req, res) => {
   try {
-    const tickets = await db.selectAll("tbl_support_tickets", "*", "", [], "ORDER BY created_at DESC");
-    res.json({ tickets });
+    const { page, limit, offset } = parsePagination(req.query);
+
+    const countRow = await db.queryOne(
+      "SELECT COUNT(*) as count FROM tbl_support_tickets"
+    );
+    const total = countRow?.count || 0;
+
+    const tickets = await db.queryAll(
+      `SELECT * FROM tbl_support_tickets ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    res.json({
+      tickets,
+      pagination: paginatedResponse(tickets, total, page, limit).pagination,
+    });
   } catch (error) {
     console.error("Error fetching support tickets:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
 
-// Get Feedback
 const getFeedback = async (req, res) => {
   try {
-    const feedback = await db.selectAll("tbl_feedback", "*", "", [], "ORDER BY created_at DESC");
-    res.json({ feedback });
+    const { page, limit, offset } = parsePagination(req.query);
+
+    const countRow = await db.queryOne(
+      "SELECT COUNT(*) as count FROM tbl_feedback"
+    );
+    const total = countRow?.count || 0;
+
+    const feedback = await db.queryAll(
+      `SELECT * FROM tbl_feedback ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    res.json({
+      feedback,
+      pagination: paginatedResponse(feedback, total, page, limit).pagination,
+    });
   } catch (error) {
     console.error("Error fetching feedback:", error);
     res.status(500).json({ message: "Internal Server Error" });
@@ -588,7 +574,6 @@ module.exports = {
   createUserAndSendCredentials,
   checkTrialExpirations,
   getFreeUserCount,
-  getUserLoginStats,
   getUserLoginStats,
   getOverallStats,
   getSupportTickets,

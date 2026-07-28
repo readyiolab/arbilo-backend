@@ -1,28 +1,19 @@
 const express = require('express');
 const CryptoArbitrageService = require('../services/CryptoArbitrageService');
 const CacheService = require('../services/CacheService');
+const { startBackgroundScans } = require('../services/cacheBootstrap');
 const router = express.Router();
 const combinedMiddleware = require('../middleware/userMiddleware');
 
 const cryptoService = new CryptoArbitrageService();
+const DEFAULT_INVESTMENT = 100000;
 
-// Fetch functions
-const fetchArbiTrackData = async () => {
-    return await cryptoService.getArbiTrackData();
-};
+startBackgroundScans();
 
-const fetchArbiPairData = async () => {
-    return await cryptoService.getArbitrageOpportunities(100000);
-};
+const fetchArbiTrackData = async () => cryptoService.getArbiTrackData();
+const fetchArbiPairData = async (investment = DEFAULT_INVESTMENT) =>
+  cryptoService.getArbitrageOpportunities(investment);
 
-// 🟢 PERFECT SYNC: Start Master Refresh Cycle for all signals
-// This ensures all users see the exact same timing and results
-CacheService.startMasterRefresh([
-    { key: CacheService.CACHE_KEYS.ARBI_TRACK, fetchFunction: fetchArbiTrackData },
-    { key: CacheService.CACHE_KEYS.ARBI_PAIR, fetchFunction: fetchArbiPairData }
-]);
-
-// Get cache metadata (timestamp info) - for syncing all users
 router.get('/cache-info', combinedMiddleware, async (req, res) => {
     try {
         const metadata = await CacheService.getCacheMetadata();
@@ -38,7 +29,6 @@ router.get('/cache-info', combinedMiddleware, async (req, res) => {
     }
 });
 
-// ArbiTrack API
 router.get('/arbitrack', combinedMiddleware, async (req, res) => {
     try {
         const data = await CacheService.getOrSetCache(
@@ -62,18 +52,20 @@ router.get('/arbitrack', combinedMiddleware, async (req, res) => {
     }
 });
 
-// ArbiPair API
 router.get('/:investment?', combinedMiddleware, async (req, res) => {
     try {
-        const investment = parseFloat(req.params.investment) || 100000;
+        const investment = parseFloat(req.params.investment) || DEFAULT_INVESTMENT;
+        const cacheKey = CacheService.arbipairKey(investment);
+
         const data = await CacheService.getOrSetCache(
-            CacheService.CACHE_KEYS.ARBI_PAIR,
-            fetchArbiPairData
+            cacheKey,
+            () => fetchArbiPairData(investment)
         );
         const metadata = await CacheService.getCacheMetadata();
 
         res.json({
             data,
+            investment,
             cacheInfo: metadata || {
                 lastUpdated: new Date().toISOString(),
                 lastUpdatedTimestamp: Date.now(),
